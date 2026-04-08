@@ -27,20 +27,50 @@ void BreakdownView::set_on_filter_changed(FilterChangedCb cb) {
 }
 
 // ------------------------------------------------------------
-//  render_reset_button — clears ALL active filters
+//  inline_reset — renders a right-aligned "×" SmallButton on
+//  the same line as the caller (use after a CollapsingHeader).
+//  Only renders when `active` is true. Returns true if clicked.
+// ------------------------------------------------------------
+static bool inline_reset(const char* id, bool active, const char* tooltip = nullptr) {
+    if (!active) return false;
+    ImGui::SameLine();
+    float x = ImGui::GetContentRegionMax().x
+              - ImGui::CalcTextSize("x").x
+              - ImGui::GetStyle().FramePadding.x * 2.0f - 2.0f;
+    ImGui::SetCursorPosX(x);
+
+    // Red tint for the reset button so it reads as "destructive / clear"
+    ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.0f,  0.0f,  0.0f,  1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.18f, 0.06f, 0.06f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.28f, 0.08f, 0.08f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_Text,          ImVec4(0.85f, 0.25f, 0.25f, 1.0f));
+    bool clicked = ImGui::SmallButton(id);
+    ImGui::PopStyleColor(4);
+
+    if (tooltip && ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", tooltip);
+    return clicked;
+}
+
+// ------------------------------------------------------------
+//  render_reset_button — global "Reset all" (kept for header compat)
 // ------------------------------------------------------------
 void BreakdownView::render_reset_button() {
-    if (!filter_) return;
-    if (!filter_->active()) return; // nothing to reset, don't show
-
-    // Right-align the button
-    float btn_w = ImGui::CalcTextSize("Reset filters").x
+    if (!filter_ || !filter_->active()) return;
+    float btn_w = ImGui::CalcTextSize("Reset all").x
                   + ImGui::GetStyle().FramePadding.x * 2.0f;
     ImGui::SameLine(ImGui::GetContentRegionMax().x - btn_w);
-    if (ImGui::SmallButton("Reset filters")) {
+    ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.0f,  0.0f,  0.0f,  1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.18f, 0.06f, 0.06f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.28f, 0.08f, 0.08f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_Text,          ImVec4(0.85f, 0.25f, 0.25f, 1.0f));
+    if (ImGui::SmallButton("Reset all")) {
         filter_->clear();
         if (on_filter_changed_) on_filter_changed_();
     }
+    ImGui::PopStyleColor(4);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Clear every active filter");
 }
 
 // ------------------------------------------------------------
@@ -53,7 +83,7 @@ void BreakdownView::render_bar_chart(const char* label, const CountMap& data,
     if (data.empty()) return;
     size_t N = std::min(data.size(), size_t(12));
 
-    static double  values[12];
+    static double      values[12];
     static const char* names[12];
     for (size_t i = 0; i < N; ++i) {
         values[i] = static_cast<double>(data[i].count);
@@ -61,26 +91,33 @@ void BreakdownView::render_bar_chart(const char* label, const CountMap& data,
     }
 
     ImGui::PushID(label);
-    if (ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen)) {
+    bool open = ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen);
+
+    // Per-section reset — visible when this field has an active filter
+    bool section_active = filter_ && (filter_->*field) != 0;
+    char reset_id[64];
+    std::snprintf(reset_id, sizeof(reset_id), "x##rst_%s", label);
+    char tooltip[128];
+    std::snprintf(tooltip, sizeof(tooltip), "Clear %s filter", label);
+    if (inline_reset(reset_id, section_active, tooltip)) {
+        filter_->*field = 0;
+        if (on_filter_changed_) on_filter_changed_();
+    }
+
+    if (open) {
         float chart_h = std::min(180.0f, 24.0f * static_cast<float>(N) + 30.0f);
 
-        // Give ImPlot enough left padding for the Y-axis label strings
-        // and enough right padding so the X-axis tick labels don't clip.
         ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(8, 4));
 
         if (ImPlot::BeginPlot("##bc", ImVec2(-1, chart_h),
                                ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
         {
-            // X axis: auto-fit with a 10% right margin so the largest count
-            // label has room; no tick marks (saves horizontal space).
             ImPlot::SetupAxes(nullptr, nullptr,
                               ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_NoLabel |
                               ImPlotAxisFlags_NoTickMarks,
                               ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_NoLabel |
                               ImPlotAxisFlags_NoTickMarks);
 
-            // Compute the max value and add 15% right padding so the
-            // rightmost tick label has room and doesn't clip against the edge
             double max_val = 0;
             for (size_t i = 0; i < N; ++i)
                 if (values[i] > max_val) max_val = values[i];
@@ -111,7 +148,7 @@ void BreakdownView::render_bar_chart(const char* label, const CountMap& data,
 
             if (ImPlot::IsPlotHovered() && ImGui::IsMouseClicked(0)) {
                 ImPlotPoint mp = ImPlot::GetPlotMousePos();
-                int clicked_i = static_cast<int>(std::round(mp.y));
+                int clicked_i  = static_cast<int>(std::round(mp.y));
                 if (clicked_i >= 0 && clicked_i < static_cast<int>(N) && filter_) {
                     if (is_severity) {
                         Severity sev = severity_from_string(data[clicked_i].label.c_str());
@@ -137,10 +174,23 @@ void BreakdownView::render_table(const char* label, const CountMap& data,
 {
     if (data.empty()) return;
     ImGui::PushID(label);
-    if (ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGuiTableFlags tf = ImGuiTableFlags_RowBg    |
-                             ImGuiTableFlags_BordersOuter |
-                             ImGuiTableFlags_ScrollY      |
+    bool open = ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen);
+
+    // Per-section reset
+    bool section_active = filter_ && (filter_->*field) != 0;
+    char reset_id[64];
+    std::snprintf(reset_id, sizeof(reset_id), "x##rst_%s", label);
+    char tooltip[128];
+    std::snprintf(tooltip, sizeof(tooltip), "Clear %s filter", label);
+    if (inline_reset(reset_id, section_active, tooltip)) {
+        filter_->*field = 0;
+        if (on_filter_changed_) on_filter_changed_();
+    }
+
+    if (open) {
+        ImGuiTableFlags tf = ImGuiTableFlags_RowBg        |
+                             ImGuiTableFlags_BordersOuter  |
+                             ImGuiTableFlags_ScrollY        |
                              ImGuiTableFlags_SizingStretchProp;
         float max_h = std::min(160.0f, 20.0f * static_cast<float>(data.size()) + 24.0f);
         if (ImGui::BeginTable("##t", 2, tf, ImVec2(-1, max_h))) {
@@ -200,10 +250,6 @@ void BreakdownView::render_table(const char* label, const CountMap& data,
 
 // ------------------------------------------------------------
 //  render_table_multi — multi-select with inclusion set
-//
-//  Clicking a row toggles its StringTable index in/out of
-//  filter_->*set_field.  Multiple rows can be active at once;
-//  all are highlighted in the same pastel blue.
 // ------------------------------------------------------------
 void BreakdownView::render_table_multi(const char* label, const CountMap& data,
                                         std::unordered_set<uint32_t> FilterState::*set_field)
@@ -211,22 +257,17 @@ void BreakdownView::render_table_multi(const char* label, const CountMap& data,
     if (data.empty()) return;
     ImGui::PushID(label);
 
-    // Header row: collapsing label + right-aligned "Clear" shortcut
     bool open = ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen);
 
-    // Show a small "×" clear button next to the header when anything is selected
-    if (filter_ && !(filter_->*set_field).empty()) {
-        ImGui::SameLine();
-        float x = ImGui::GetContentRegionMax().x
-                  - ImGui::CalcTextSize("x").x
-                  - ImGui::GetStyle().FramePadding.x * 2.0f - 2.0f;
-        ImGui::SetCursorPosX(x);
-        if (ImGui::SmallButton("x##clr")) {
-            (filter_->*set_field).clear();
-            if (on_filter_changed_) on_filter_changed_();
-        }
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Clear component filter");
+    // Per-section reset — only when the set is non-empty
+    bool section_active = filter_ && !(filter_->*set_field).empty();
+    char reset_id[64];
+    std::snprintf(reset_id, sizeof(reset_id), "x##rst_%s", label);
+    char tooltip[128];
+    std::snprintf(tooltip, sizeof(tooltip), "Clear %s filter", label);
+    if (inline_reset(reset_id, section_active, tooltip)) {
+        (filter_->*set_field).clear();
+        if (on_filter_changed_) on_filter_changed_();
     }
 
     if (open) {
@@ -241,8 +282,7 @@ void BreakdownView::render_table_multi(const char* label, const CountMap& data,
             ImGui::TableHeadersRow();
 
             static constexpr ImU32 SEL_BG = IM_COL32(160, 200, 255, 255);
-            static const ImVec4 pastel_hdr = {
-                160/255.0f, 200/255.0f, 255/255.0f, 1.0f };
+            static const ImVec4 pastel_hdr = {160/255.0f, 200/255.0f, 255/255.0f, 1.0f};
 
             auto& active_set = filter_ ? (filter_->*set_field)
                                        : *static_cast<std::unordered_set<uint32_t>*>(nullptr);
@@ -277,10 +317,8 @@ void BreakdownView::render_table_multi(const char* label, const CountMap& data,
                 ImGui::PopStyleColor();
 
                 if (clicked && filter_ && row_idx != 0) {
-                    if (selected)
-                        active_set.erase(row_idx);
-                    else
-                        active_set.insert(row_idx);
+                    if (selected) active_set.erase(row_idx);
+                    else          active_set.insert(row_idx);
                     if (on_filter_changed_) on_filter_changed_();
                 }
 
@@ -312,21 +350,19 @@ void BreakdownView::render() {
         ImGui::Text("Total entries: %s",
             fmt_count_buf(analysis_->total_entries, c1, sizeof(c1)));
 
+        // Global "Reset all" — right-aligned on same line, red, shown when any filter active
+        render_reset_button();
+
         // Slow queries: clickable, toggles slow_query_only filter
         bool slow_active = filter_ && filter_->slow_query_only;
-        if (slow_active) {
-            // Highlight the label in amber when filter is on
+        if (slow_active)
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.75f, 0.1f, 1.0f));
-        }
+
         char sq_label[64];
         std::snprintf(sq_label, sizeof(sq_label), "Slow queries:  %s",
             fmt_count_buf(analysis_->slow_queries, c2, sizeof(c2)));
 
-        // Use a Selectable so the whole line is clickable
-        if (ImGui::Selectable(sq_label, slow_active,
-                              ImGuiSelectableFlags_None,
-                              ImVec2(0, 0)))
-        {
+        if (ImGui::Selectable(sq_label, slow_active, ImGuiSelectableFlags_None, ImVec2(0,0))) {
             if (filter_) {
                 filter_->slow_query_only = !filter_->slow_query_only;
                 if (on_filter_changed_) on_filter_changed_();
@@ -337,20 +373,14 @@ void BreakdownView::render() {
             ImGui::SetTooltip("Click to filter to slow queries only (durationMillis > 100)");
     }
 
-    // Reset button — top right, only visible when any filter is active
-    render_reset_button();
-
     ImGui::Separator();
 
     render_bar_chart("Severity", analysis_->by_severity,
                      &FilterState::severity_filter, /*is_severity=*/true);
     render_bar_chart("Operation Type", analysis_->by_op_type,
                      &FilterState::op_type_idx);
-
-    // Component uses multi-select
     render_table_multi("Component", analysis_->by_component,
                        &FilterState::component_idx_include);
-
     render_table("Driver",      analysis_->by_driver,    &FilterState::driver_idx);
     render_table("Namespace",   analysis_->by_namespace, &FilterState::ns_idx);
     render_table("Query Shape", analysis_->by_shape,     &FilterState::shape_idx);

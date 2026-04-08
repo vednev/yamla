@@ -94,11 +94,26 @@ void FilterView::clear_all_driver() {
 void FilterView::render_conn_section() {
     if (!analysis_ || !filter_) return;
 
-    // Header row: title + All / None buttons on the right
+    // Header row: title + reset (×) + All / None buttons on the right
     ImGui::Text("Connections (%zu)", analysis_->by_conn_id.size());
     ImGui::SameLine();
+
+    // Per-section reset — red ×, visible when any connection is selected
+    bool conn_active = !filter_->conn_id_include.empty();
     float btn_w = ImGui::CalcTextSize("All").x + ImGui::GetStyle().FramePadding.x * 2 + 4;
-    ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - btn_w * 2 - 4);
+    float reset_w = ImGui::CalcTextSize("x").x + ImGui::GetStyle().FramePadding.x * 2 + 4;
+    float right_x = ImGui::GetContentRegionMax().x;
+    ImGui::SetCursorPosX(right_x - btn_w * 2 - reset_w - 8);
+    if (conn_active) {
+        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.0f,  0.0f,  0.0f,  1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.18f, 0.06f, 0.06f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.28f, 0.08f, 0.08f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text,          ImVec4(0.85f, 0.25f, 0.25f, 1.0f));
+        if (ImGui::SmallButton("x##connrst")) clear_all_conn();
+        ImGui::PopStyleColor(4);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Clear connection filter");
+        ImGui::SameLine(0, 4);
+    }
     if (ImGui::SmallButton("All##c"))  select_all_conn();
     ImGui::SameLine(0, 4);
     if (ImGui::SmallButton("None##c")) clear_all_conn();
@@ -158,8 +173,21 @@ void FilterView::render_driver_section() {
 
     ImGui::Text("Drivers (%zu)", analysis_->by_driver.size());
     ImGui::SameLine();
-    float btn_w = ImGui::CalcTextSize("All").x + ImGui::GetStyle().FramePadding.x * 2 + 4;
-    ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - btn_w * 2 - 4);
+
+    bool drv_active = !filter_->driver_idx_include.empty();
+    float btn_w   = ImGui::CalcTextSize("All").x + ImGui::GetStyle().FramePadding.x * 2 + 4;
+    float reset_w = ImGui::CalcTextSize("x").x   + ImGui::GetStyle().FramePadding.x * 2 + 4;
+    ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - btn_w * 2 - (drv_active ? reset_w + 4 : 0) - 4);
+    if (drv_active) {
+        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.0f,  0.0f,  0.0f,  1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.18f, 0.06f, 0.06f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.28f, 0.08f, 0.08f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text,          ImVec4(0.85f, 0.25f, 0.25f, 1.0f));
+        if (ImGui::SmallButton("x##drvrst")) clear_all_driver();
+        ImGui::PopStyleColor(4);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Clear driver filter");
+        ImGui::SameLine(0, 4);
+    }
     if (ImGui::SmallButton("All##d"))  select_all_driver();
     ImGui::SameLine(0, 4);
     if (ImGui::SmallButton("None##d")) clear_all_driver();
