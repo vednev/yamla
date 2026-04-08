@@ -7,6 +7,23 @@ inspecting and filtering MongoDB 4.4+ structured JSON logs.
 > YAMLA does not currently support MongoDB Agent logs, Ops Manager logs,
 > `mongos` router logs, or FTDC diagnostic data files.
 
+## Screenshots
+
+**Start screen**
+![Start screen](screenshots/start_screen.png)
+
+**Loading progress**
+![Loading progress](screenshots/loading_progress_screen.png)
+
+**Post-load overview — breakdown panels, log list, filter panel**
+![Post-load screen](screenshots/post_load_screen.png)
+
+**Severity filter active — bar chart highlight and filtered log list**
+![Severity filter](screenshots/detail_view_severity_filter.png)
+
+**Detail view — log entry inspected as a formatted JSON tree**
+![Detail view](screenshots/detail_view_log_entry.png)
+
 ## Dependencies
 
 | Tool | Notes |
