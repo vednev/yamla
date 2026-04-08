@@ -35,16 +35,30 @@ struct StringBatch {
 
     void clear() { owned.clear(); cache.clear(); }
 
-    void stage(std::string_view sv) {
-        if (!sv.empty()) cache.emplace(sv, 0u);
+    // Stage a string by value — copies into `owned` so the key is stable
+    // regardless of where the source string_view points (simdjson tape,
+    // mmap, or stack).  Returns the stable string_view into owned storage.
+    std::string_view stage(std::string_view sv) {
+        if (sv.empty()) return {};
+        // Check if already staged (dedup by value)
+        auto it = cache.find(sv);
+        if (it != cache.end()) return it->first; // return existing stable view
+        // Copy into owned for stable key
+        owned.emplace_back(sv.data(), sv.size());
+        std::string_view stable(owned.back());
+        cache.emplace(stable, 0u);
+        return stable;
     }
 
     std::string_view stage_owned(std::string&& s) {
         if (s.empty()) return {};
+        // Check dedup before moving
+        auto it = cache.find(std::string_view(s));
+        if (it != cache.end()) return it->first;
         owned.push_back(std::move(s));
-        std::string_view sv(owned.back());
-        cache.emplace(sv, 0u);
-        return sv;
+        std::string_view stable(owned.back());
+        cache.emplace(stable, 0u);
+        return stable;
     }
 
     uint32_t get(std::string_view sv) const {
@@ -54,12 +68,12 @@ struct StringBatch {
     }
 };
 
-// Per-thread string batch (persistent — survives across batches to
-// avoid repeated malloc/free for the unordered_map's bucket array)
+// Per-thread string batch (persistent — survives across batches)
 static thread_local StringBatch tl_batch;
 
-// Per-thread staging vectors — persistent across batches to avoid
-// per-batch heap allocation.  Grow to high-water-mark and stay there.
+// Per-thread staging vectors — persistent across batches.
+// NOTE: SVS holds string_views into tl_batch.owned (stable deque storage),
+// NOT into simdjson's internal tape (which is invalidated per document).
 struct SVS { std::string_view comp, msg, ns, op, shape, drv; };
 static thread_local std::vector<LogEntry> tl_entries;
 static thread_local std::vector<SVS>      tl_svs;
@@ -217,21 +231,20 @@ ParseResult LogParser::parse_batch(const ParseBatch& batch) {
         e.timestamp_ms = parse_timestamp(ts);
 
         // severity
+        // stage() copies the string_view bytes into tl_batch.owned (deque)
+        // and returns a stable string_view into that storage.
+        // This is required because simdjson's tape (from which get_string()
+        // returns string_views) is invalidated when the iterator advances
+        // to the next document in parse_many.
         std::string_view v;
-        if (doc["s"].get_string().get(v) == simdjson::SUCCESS && !v.empty())
-            e.severity = severity_from_char(v[0]);
-
-        // component
-        if (doc["c"].get_string().get(v)   == simdjson::SUCCESS) { sv.comp=v; tl_batch.stage(v); }
-        // ctx
-        if (doc["ctx"].get_string().get(v)  == simdjson::SUCCESS) e.conn_id = parse_conn_id(v);
-        // msg
-        if (doc["msg"].get_string().get(v)  == simdjson::SUCCESS) { sv.msg=v; tl_batch.stage(v); }
+        if (doc["c"].get_string().get(v)  == simdjson::SUCCESS) sv.comp = tl_batch.stage(v);
+        if (doc["ctx"].get_string().get(v) == simdjson::SUCCESS) e.conn_id = parse_conn_id(v);
+        if (doc["msg"].get_string().get(v) == simdjson::SUCCESS) sv.msg  = tl_batch.stage(v);
 
         simdjson::dom::element attr;
         if (doc["attr"].get(attr) == simdjson::SUCCESS) {
             if (attr["ns"].get_string().get(v) == simdjson::SUCCESS)
-                { sv.ns=v; tl_batch.stage(v); }
+                sv.ns = tl_batch.stage(v);
 
             int64_t dur = 0;
             if (attr["durationMillis"].get_int64().get(dur) == simdjson::SUCCESS)
@@ -243,8 +256,10 @@ ParseResult LogParser::parse_batch(const ParseBatch& batch) {
             {
                 for (auto [k, val] : cmd_obj.get_object().value()) {
                     if (k.empty() || k[0]=='$') continue;
-                    sv.op = normalize_op(k);
-                    tl_batch.stage(sv.op);
+                    // normalize_op returns string_view into static storage
+                    // (for known ops) or into the simdjson tape (for unknown).
+                    // Stage it so we always get a stable view back.
+                    sv.op = tl_batch.stage(normalize_op(k));
                     break;
                 }
                 simdjson::dom::element filter;
