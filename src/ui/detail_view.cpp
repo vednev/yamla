@@ -1,4 +1,5 @@
 #include "detail_view.hpp"
+#include "log_key_names.hpp"
 
 #include <imgui.h>
 #include <simdjson.h>
@@ -13,28 +14,50 @@
 static thread_local simdjson::dom::parser tl_parser;
 
 // ------------------------------------------------------------
-//  Forward declarations for recursive helpers
+//  Forward declarations — all helpers now carry `ctx`
 // ------------------------------------------------------------
 static void render_element(const char* key,
                             const simdjson::dom::element& el,
-                            bool wrap);
+                            bool wrap,
+                            const char* ctx);
 
 // ------------------------------------------------------------
-//  render_object / render_array — recursive tree nodes
+//  Context helpers
+//  child_ctx() appends ".key" to the parent context in a
+//  stack-allocated buffer and returns a pointer into it.
+//  The buffer is local to the caller's scope.
+// ------------------------------------------------------------
+#define CHILD_CTX(parent_ctx, key_str, buf) \
+    do { std::snprintf((buf), sizeof(buf), "%s.%s", (parent_ctx), (key_str)); } while(0)
+
+// ------------------------------------------------------------
+//  render_object / render_array
 // ------------------------------------------------------------
 
 static void render_object(const char* label,
                            const simdjson::dom::element& el,
                            bool wrap,
+                           const char* ctx,
                            bool default_open = false)
 {
     ImGuiTreeNodeFlags flags = default_open ? ImGuiTreeNodeFlags_DefaultOpen : 0;
+    // The label shown on the tree node is the already-translated key
     if (ImGui::TreeNodeEx(label, flags)) {
         for (auto [k, v] : el.get_object().value()) {
-            char key_buf[256];
-            std::snprintf(key_buf, sizeof(key_buf), "%.*s",
+            // Build the raw key as a null-terminated string
+            char raw_key[256];
+            std::snprintf(raw_key, sizeof(raw_key), "%.*s",
                           static_cast<int>(k.size()), k.data());
-            render_element(key_buf, v, wrap);
+
+            // Build child context: parent_ctx.raw_key
+            char child_ctx[512];
+            CHILD_CTX(ctx, raw_key, child_ctx);
+
+            // Translate raw_key → display label using the child context
+            // (the label is what the user sees; raw_key drives context lookups)
+            const char* display = log_key_label(raw_key, ctx);
+
+            render_element(display, v, wrap, child_ctx);
         }
         ImGui::TreePop();
     }
@@ -42,45 +65,39 @@ static void render_object(const char* label,
 
 static void render_array(const char* label,
                           const simdjson::dom::element& el,
-                          bool wrap)
+                          bool wrap,
+                          const char* ctx)
 {
     if (ImGui::TreeNode(label)) {
         int idx = 0;
         for (auto item : el.get_array().value()) {
             char idx_buf[32];
             std::snprintf(idx_buf, sizeof(idx_buf), "[%d]", idx++);
-            render_element(idx_buf, item, wrap);
+            // Array elements keep parent ctx — their index isn't a key name
+            render_element(idx_buf, item, wrap, ctx);
         }
         ImGui::TreePop();
     }
 }
 
 // ------------------------------------------------------------
-//  render_leaf — a single scalar value row.
-//
-//  No-wrap: fixed-width key column, value on same line.
-//           Uses ImGui::Text with a %-24s format.
-//  Wrap:    "key: value" on one line; if the value is long,
-//           ImGui::TextWrapped lets it flow onto the next line.
-//           The key is rendered in a dimmer colour so it's
-//           visually distinct from the value.
+//  render_leaf_impl
 // ------------------------------------------------------------
 static void render_leaf_impl(const char* key, ImVec4 value_color,
                               const char* value_str, bool wrap)
 {
     if (!wrap) {
-        // Fixed-column, no wrapping
         ImGui::PushStyleColor(ImGuiCol_Text, value_color);
-        ImGui::Text("%-24s : %s", key, value_str);
+        ImGui::Text("%-36s  %s", key, value_str);
         ImGui::PopStyleColor();
     } else {
-        // Wrap mode: "key: " in dim + value in colour, soft-wrapped
+        // key in dim, value coloured, soft-wrapped
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.55f, 0.55f, 1.0f));
         ImGui::TextUnformatted(key);
         ImGui::PopStyleColor();
         ImGui::SameLine(0, 0);
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.55f, 0.55f, 1.0f));
-        ImGui::TextUnformatted(": ");
+        ImGui::TextUnformatted(":  ");
         ImGui::PopStyleColor();
         ImGui::SameLine(0, 0);
         ImGui::PushStyleColor(ImGuiCol_Text, value_color);
@@ -89,27 +106,29 @@ static void render_leaf_impl(const char* key, ImVec4 value_color,
     }
 }
 
+// ------------------------------------------------------------
+//  render_element
+// ------------------------------------------------------------
 static void render_element(const char* key,
                             const simdjson::dom::element& el,
-                            bool wrap)
+                            bool wrap,
+                            const char* ctx)
 {
     using T = simdjson::dom::element_type;
     switch (el.type()) {
         case T::OBJECT:
-            render_object(key, el, wrap);
+            render_object(key, el, wrap, ctx);
             break;
         case T::ARRAY:
-            render_array(key, el, wrap);
+            render_array(key, el, wrap, ctx);
             break;
         case T::STRING: {
             std::string_view sv;
             (void)el.get_string().get(sv);
-            // Build the quoted string in a stack buffer; fall back to
-            // heap only for very long strings
             char small[512];
             const char* val_str;
             std::string heap_str;
-            size_t needed = sv.size() + 3; // " + content + " + null
+            size_t needed = sv.size() + 3;
             if (needed <= sizeof(small)) {
                 small[0] = '"';
                 std::memcpy(small + 1, sv.data(), sv.size());
@@ -176,7 +195,6 @@ void DetailView::render_toolbar() {
 }
 
 void DetailView::render_inner() {
-    // Toolbar strip at the top of the panel
     render_toolbar();
     ImGui::Separator();
 
@@ -197,13 +215,13 @@ void DetailView::render_inner() {
         return;
     }
 
-    // Scrollable child — horizontal scrollbar only shown when not wrapping
     ImGuiWindowFlags scroll_flags = wrap_
         ? ImGuiWindowFlags_None
         : ImGuiWindowFlags_HorizontalScrollbar;
 
     ImGui::BeginChild("##detail_scroll", ImVec2(0, 0), false, scroll_flags);
-    render_object("document", doc, wrap_, /*default_open=*/true);
+    // Root context is "document"; top-level keys matched against "document" context
+    render_object("document", doc, wrap_, "document", /*default_open=*/true);
     ImGui::EndChild();
 }
 
