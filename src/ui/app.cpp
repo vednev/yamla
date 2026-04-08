@@ -269,14 +269,20 @@ void App::handle_drop(const std::vector<std::string>& paths) {
 }
 
 void App::start_load(const std::vector<std::string>& paths) {
-    // Reset state
+    // Reset all UI state that holds raw pointers into the old cluster/arena.
+    // This must happen BEFORE cluster_ is destroyed (below) so no render
+    // frame can access dangling pointers between destruction and the new
+    // cluster becoming ready.
     filter_.clear();
     detail_view_.set_entry(nullptr, nullptr, nullptr);
-    filter_view_.set_analysis(nullptr, nullptr); // clear stale data
+    log_view_.set_entries(nullptr, 0, nullptr, nullptr); // clear raw ptr to old arena
+    breakdown_view_.set_analysis(nullptr, nullptr);
+    filter_view_.set_analysis(nullptr, nullptr);
     node_files_.clear();
-    total_file_bytes_ = 0;
-    load_duration_s_  = 0.0;
-    load_start_       = std::chrono::steady_clock::now();
+    total_file_bytes_   = 0;
+    load_duration_s_    = 0.0;
+    last_cluster_state_ = LoadState::Idle; // reset so Ready transition fires on new load
+    load_start_         = std::chrono::steady_clock::now();
 
     // Compute total file size to size the arena
     size_t total_bytes = 0;
@@ -554,11 +560,12 @@ void App::render_loading_popup() {
 //  render_frame
 // ------------------------------------------------------------
 void App::render_frame() {
-    // If a load just finished → update UI views
-    static LoadState last_state = LoadState::Idle;
+    // If a load just finished → update UI views.
+    // last_cluster_state_ is a member so start_load() can reset it to Idle,
+    // ensuring the Ready transition always fires exactly once per load.
     if (cluster_) {
         LoadState cur = cluster_->state();
-        if (cur != last_state && cur == LoadState::Ready) {
+        if (cur != last_cluster_state_ && cur == LoadState::Ready) {
             auto now = std::chrono::steady_clock::now();
             load_duration_s_ = std::chrono::duration<double>(
                 now - load_start_).count();
@@ -572,7 +579,7 @@ void App::render_frame() {
             filter_view_.set_analysis(&cluster_->analysis(),
                                        &cluster_->strings());
         }
-        last_state = cur;
+        last_cluster_state_ = cur;
     }
 
     render_menu_bar();

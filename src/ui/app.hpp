@@ -81,7 +81,8 @@ private:
     // We store all open mmap files during a session.
     std::vector<std::unique_ptr<MmapFile>> node_files_;
 
-    bool running_ = true;
+    bool      running_           = true;
+    LoadState last_cluster_state_ = LoadState::Idle;
 
     // Width of the right (detail) panel — user-draggable splitter
     float right_w_ = 420.0f;
