@@ -115,7 +115,7 @@ void LogView::render_inner() {
     if (filter_) {
         static char search_buf[256] = {};
 
-        // Measure the Clear button width so the input can fill remaining space
+        // Black background button with red text for Clear
         const char* clear_label = "Clear";
         float btn_w = ImGui::CalcTextSize(clear_label).x
                       + ImGui::GetStyle().FramePadding.x * 2.0f + 8.0f;
@@ -127,23 +127,34 @@ void LogView::render_inner() {
 
         ImGui::SameLine();
 
-        // Pastel olive green for the Clear button
-        ImGui::PushStyleColor(ImGuiCol_Button,
-            ImVec4(0.45f, 0.52f, 0.25f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
-            ImVec4(0.55f, 0.63f, 0.32f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive,
-            ImVec4(0.35f, 0.42f, 0.18f, 1.0f));
+        // Clear: black fill, red text, subtle hover
+        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.0f, 0.0f, 0.0f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.18f, 0.06f, 0.06f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.28f, 0.08f, 0.08f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text,          ImVec4(0.85f, 0.25f, 0.25f, 1.0f));
         if (ImGui::Button(clear_label)) {
             filter_->clear();
             std::memset(search_buf, 0, sizeof(search_buf));
+            search_dirty_ = false;
             rebuild_filter_index();
         }
-        ImGui::PopStyleColor(3);
+        ImGui::PopStyleColor(4);
 
         if (changed) {
+            // Mark dirty and record timestamp — actual rebuild is debounced below
             filter_->text_search = search_buf;
-            rebuild_filter_index();
+            search_dirty_     = true;
+            search_dirty_time_ = ImGui::GetTime();
+        }
+
+        // Debounce: rebuild only after DEBOUNCE_MS of inactivity
+        // This keeps the render loop free while the user is typing.
+        if (search_dirty_) {
+            double elapsed_ms = (ImGui::GetTime() - search_dirty_time_) * 1000.0;
+            if (elapsed_ms >= DEBOUNCE_MS) {
+                rebuild_filter_index();
+                search_dirty_ = false;
+            }
         }
 
         ImGui::Spacing();

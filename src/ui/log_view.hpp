@@ -104,4 +104,9 @@ private:
 
     // Cache for text-search lowercase conversion
     mutable std::string          search_lower_;
+
+    // Debounce: rebuild only when user pauses typing for DEBOUNCE_MS
+    static constexpr double      DEBOUNCE_MS = 150.0;
+    bool                         search_dirty_     = false;
+    double                       search_dirty_time_ = 0.0; // ImGui time at last keystroke
 };

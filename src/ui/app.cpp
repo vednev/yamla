@@ -76,7 +76,7 @@ bool App::init() {
         SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
     window_ = SDL_CreateWindow("YAMLA — MongoDB Log Analyzer",
                                 SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                                1024, 768, flags);
+                                1920, 1080, flags);
     if (!window_) {
         std::fprintf(stderr, "SDL_CreateWindow error: %s\n", SDL_GetError());
         return false;
