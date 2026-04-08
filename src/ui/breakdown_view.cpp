@@ -107,7 +107,7 @@ void BreakdownView::render_bar_chart(const char* label, const CountMap& data,
     // Per-section reset — visible when this field has an active filter
     bool section_active = filter_ && (filter_->*field) != 0;
     char reset_id[64];
-    std::snprintf(reset_id, sizeof(reset_id), "x##rst_%s", label);
+    std::snprintf(reset_id, sizeof(reset_id), "##rst_%s", label);
     char tooltip[128];
     std::snprintf(tooltip, sizeof(tooltip), "Clear %s filter", label);
     if (inline_reset("Clear", reset_id, section_active, tooltip)) {
@@ -190,7 +190,7 @@ void BreakdownView::render_table(const char* label, const CountMap& data,
     // Per-section reset
     bool section_active = filter_ && (filter_->*field) != 0;
     char reset_id[64];
-    std::snprintf(reset_id, sizeof(reset_id), "x##rst_%s", label);
+    std::snprintf(reset_id, sizeof(reset_id), "##rst_%s", label);
     char tooltip[128];
     std::snprintf(tooltip, sizeof(tooltip), "Clear %s filter", label);
     if (inline_reset("Clear", reset_id, section_active, tooltip)) {
@@ -273,7 +273,7 @@ void BreakdownView::render_table_multi(const char* label, const CountMap& data,
     // Per-section reset — only when the set is non-empty
     bool section_active = filter_ && !(filter_->*set_field).empty();
     char reset_id[64];
-    std::snprintf(reset_id, sizeof(reset_id), "x##rst_%s", label);
+    std::snprintf(reset_id, sizeof(reset_id), "##rst_%s", label);
     char tooltip[128];
     std::snprintf(tooltip, sizeof(tooltip), "Clear %s filter", label);
     if (inline_reset("Clear", reset_id, section_active, tooltip)) {
