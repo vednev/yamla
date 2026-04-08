@@ -10,6 +10,9 @@
 #include "../analysis/cluster.hpp"
 #include "colors.hpp"
 
+// Soft pastel blue used for selected rows (black text over this is readable)
+static constexpr ImU32 SEL_ROW_BG = IM_COL32(160, 200, 255, 255);
+
 // ------------------------------------------------------------
 //  Helpers
 // ------------------------------------------------------------
@@ -124,7 +127,7 @@ void LogView::render_inner() {
         ImGui::Separator();
     }
 
-    // ---- Table header ----------------------------------------
+    // ---- Table -----------------------------------------------
     ImGuiTableFlags table_flags =
         ImGuiTableFlags_RowBg        | ImGuiTableFlags_BordersOuter |
         ImGuiTableFlags_BordersV     | ImGuiTableFlags_ScrollY      |
@@ -153,47 +156,48 @@ void LogView::render_inner() {
             const LogEntry& e = entries_[idx];
 
             ImGui::TableNextRow();
-            ImGui::PushID(row); // unique ID scope per row — prevents duplicate-timestamp ID collisions
+            ImGui::PushID(row);
 
             bool is_selected = (selected_row_ == row);
 
-            // Selected rows get a solid white background so the full
-            // row is visually inverted (text will be pushed to black below).
+            // Selected row: soft pastel blue fill, all text in black.
+            // Normal rows: dark alternating ImGui default, white text.
             if (is_selected) {
-                ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,
-                    IM_COL32(255, 255, 255, 255));
+                ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, SEL_ROW_BG);
+                ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1, SEL_ROW_BG);
             }
 
-            // Timestamp + selectable
+            // Text colours for this row
+            const ImVec4 text_normal = ImVec4(1, 1, 1, 1);
+            const ImVec4 text_sel    = ImVec4(0, 0, 0, 1);
+            const ImVec4 row_text    = is_selected ? text_sel : text_normal;
+
+            // ---- Col 0: Timestamp + spanning selectable ----
             ImGui::TableSetColumnIndex(0);
             {
                 int64_t ts = e.timestamp_ms;
-                time_t sec = static_cast<time_t>(ts / 1000);
-                int    ms  = static_cast<int>(ts % 1000);
+                time_t  sec = static_cast<time_t>(ts / 1000);
+                int     ms  = static_cast<int>(ts % 1000);
                 struct tm t{};
 #if defined(_WIN32)
                 gmtime_s(&t, &sec);
 #else
                 gmtime_r(&sec, &t);
 #endif
-                char ts_buf[64];
+                char ts_buf[32];
                 std::snprintf(ts_buf, sizeof(ts_buf),
                               "%04d-%02d-%02d %02d:%02d:%02d.%03d",
                               t.tm_year+1900, t.tm_mon+1, t.tm_mday,
                               t.tm_hour, t.tm_min, t.tm_sec, ms);
 
-                // Draw the invisible spanning selectable first so we can
-                // query hover state for the text colour decision below.
                 bool clicked = ImGui::Selectable("##row", is_selected,
                                                  ImGuiSelectableFlags_SpanAllColumns,
                                                  ImVec2(0, 0));
-                bool row_hot = is_selected || ImGui::IsItemHovered();
-
                 ImGui::SameLine();
-                // On a hot (hovered/selected) row use black text so it's
-                // readable against the white fill; otherwise use severity colour.
-                ImVec4 ts_col = row_hot
-                    ? ImVec4(0, 0, 0, 1)
+
+                // Timestamp in severity colour on normal rows, black on selected
+                ImVec4 ts_col = is_selected
+                    ? text_sel
                     : ImGui::ColorConvertU32ToFloat4(severity_color_u32(e.severity));
                 ImGui::PushStyleColor(ImGuiCol_Text, ts_col);
                 ImGui::TextUnformatted(ts_buf);
@@ -203,59 +207,48 @@ void LogView::render_inner() {
                     selected_row_ = row;
                     if (on_select_) on_select_(idx);
                 }
-
-                // Store row_hot so other columns can use it
-                // (ImGui has no built-in per-row hover, so we re-check via
-                //  the item rect of the selectable we already submitted)
-                if (row_hot) {
-                    // Push black text for all remaining columns in this row
-                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0, 0, 0, 1));
-                } else {
-                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
-                }
             }
 
-            // Severity
+            // ---- Col 1: Severity ----
             ImGui::TableSetColumnIndex(1);
             {
-                // On hot rows keep black; on normal rows use severity colour
-                // (we already have a pushed colour from the block above —
-                //  pop it, push the right one for severity, then restore)
-                ImGui::PopStyleColor(); // pop the row-wide colour
-                bool row_hot2 = is_selected; // re-derive from selected flag
-                ImVec4 sev_col = row_hot2
-                    ? ImVec4(0, 0, 0, 1)
+                ImVec4 sev_col = is_selected
+                    ? text_sel
                     : ImGui::ColorConvertU32ToFloat4(severity_color_u32(e.severity));
                 ImGui::PushStyleColor(ImGuiCol_Text, sev_col);
                 ImGui::TextUnformatted(severity_string(e.severity));
                 ImGui::PopStyleColor();
-                // Re-push a neutral white for the remaining plain columns
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
             }
 
-            // Component
+            // ---- Col 2: Component ----
             ImGui::TableSetColumnIndex(2);
             if (strings_ && e.component_idx) {
                 auto sv = strings_->get(e.component_idx);
+                ImGui::PushStyleColor(ImGuiCol_Text, row_text);
                 ImGui::TextUnformatted(sv.data(), sv.data() + sv.size());
+                ImGui::PopStyleColor();
             }
 
-            // Namespace
+            // ---- Col 3: Namespace ----
             ImGui::TableSetColumnIndex(3);
             if (strings_ && e.ns_idx) {
                 auto sv = strings_->get(e.ns_idx);
+                ImGui::PushStyleColor(ImGuiCol_Text, row_text);
                 ImGui::TextUnformatted(sv.data(), sv.data() + sv.size());
+                ImGui::PopStyleColor();
             }
 
-            // Message
+            // ---- Col 4: Message ----
             ImGui::TableSetColumnIndex(4);
             if (strings_ && e.msg_idx) {
                 auto sv = strings_->get(e.msg_idx);
+                ImGui::PushStyleColor(ImGuiCol_Text, row_text);
                 ImGui::TextUnformatted(sv.data(),
                                        sv.data() + std::min(sv.size(), size_t(200)));
+                ImGui::PopStyleColor();
             }
 
-            // Node badges
+            // ---- Col 5: Node badges ----
             ImGui::TableSetColumnIndex(5);
             if (nodes_) {
                 for (size_t ni = 0; ni < nodes_->size() && ni < 16; ++ni) {
@@ -269,8 +262,7 @@ void LogView::render_inner() {
                 }
             }
 
-            ImGui::PopStyleColor(); // pop the row-wide text colour (white or black)
-            ImGui::PopID(); // matches PushID(row) above
+            ImGui::PopID();
         }
     }
     clipper.End();

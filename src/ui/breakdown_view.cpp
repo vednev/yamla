@@ -131,6 +131,9 @@ void BreakdownView::render_table(const char* label, const CountMap& data,
             // We need label → string_idx mapping; since CountMap uses labels,
             // we use a simple per-row selectable approach indexed by position.
             // For filtering we match by label lookup through StringTable.
+            // Pastel blue for selected rows (matches log view)
+            static constexpr ImU32 SEL_BG = IM_COL32(160, 200, 255, 255);
+
             for (size_t i = 0; i < data.size() && i < 50; ++i) {
                 ImGui::TableNextRow();
                 ImGui::PushID(static_cast<int>(i));
@@ -141,19 +144,17 @@ void BreakdownView::render_table(const char* label, const CountMap& data,
                     : 0;
                 bool selected = (current == row_idx && row_idx != 0);
 
-                // Invert on selection: white background set via TableBgColor
                 if (selected) {
-                    ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,
-                        IM_COL32(255, 255, 255, 255));
+                    ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, SEL_BG);
+                    ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1, SEL_BG);
                 }
 
-                // Invisible spanning selectable for click detection
+                // Invisible spanning selectable
                 bool clicked = ImGui::Selectable("##sel", selected,
                                                  ImGuiSelectableFlags_SpanAllColumns);
-                bool hot = selected || ImGui::IsItemHovered();
 
-                // Text colour: black on hot rows, white otherwise
-                ImVec4 txt = hot ? ImVec4(0,0,0,1) : ImVec4(1,1,1,1);
+                // Text: black on selected, white otherwise
+                ImVec4 txt = selected ? ImVec4(0,0,0,1) : ImVec4(1,1,1,1);
 
                 ImGui::SameLine();
                 ImGui::PushStyleColor(ImGuiCol_Text, txt);
