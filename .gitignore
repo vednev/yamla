@@ -32,6 +32,7 @@ generators/
 # ImGui runtime state
 imgui.ini
 
-# Dependency cache
+# Dependency cache (vendored C++ libs, not fonts)
 vendor/imgui/
 vendor/implot/
+# vendor/fonts/ is committed — do NOT ignore it

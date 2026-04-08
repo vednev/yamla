@@ -7,6 +7,7 @@
 #include <cstdio>
 
 #include "../parser/log_entry.hpp"
+#include "../core/format.hpp"
 
 // ------------------------------------------------------------
 
@@ -152,7 +153,10 @@ void BreakdownView::render_table(const char* label, const CountMap& data,
                     }
                 }
                 ImGui::TableSetColumnIndex(1);
-                ImGui::Text("%llu", static_cast<unsigned long long>(data[i].count));
+                {
+                    char cbuf[27];
+                    ImGui::TextUnformatted(fmt_count_buf(data[i].count, cbuf, sizeof(cbuf)));
+                }
             }
             ImGui::EndTable();
         }
@@ -170,10 +174,13 @@ void BreakdownView::render() {
     }
 
     // Summary header
-    ImGui::Text("Total entries: %llu",
-        static_cast<unsigned long long>(analysis_->total_entries));
-    ImGui::Text("Slow queries:  %llu",
-        static_cast<unsigned long long>(analysis_->slow_queries));
+    {
+        char c1[27], c2[27];
+        ImGui::Text("Total entries: %s",
+            fmt_count_buf(analysis_->total_entries, c1, sizeof(c1)));
+        ImGui::Text("Slow queries:  %s",
+            fmt_count_buf(analysis_->slow_queries, c2, sizeof(c2)));
+    }
     ImGui::Separator();
 
     render_bar_chart("Severity", analysis_->by_severity,

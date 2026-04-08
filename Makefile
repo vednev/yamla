@@ -91,3 +91,26 @@ clean:
 
 run: all
 	./$(TARGET)
+
+# Download bundled fonts (OFL-licensed) into vendor/fonts/
+# Run once: make fonts
+fonts:
+	@mkdir -p vendor/fonts
+	@echo "Downloading Inter..."
+	@curl -fsSL "https://github.com/rsms/inter/releases/download/v4.0/Inter-4.0.zip" -o /tmp/_inter.zip && \
+	  unzip -jo /tmp/_inter.zip "extras/ttf/Inter-Regular.ttf" -d vendor/fonts/ && \
+	  rm /tmp/_inter.zip
+	@echo "Downloading JetBrains Mono..."
+	@curl -fsSL "https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip" -o /tmp/_jbmono.zip && \
+	  unzip -jo /tmp/_jbmono.zip "fonts/ttf/JetBrainsMono-Regular.ttf" -d vendor/fonts/ && \
+	  rm /tmp/_jbmono.zip
+	@echo "Downloading Fira Code..."
+	@curl -fsSL "https://github.com/tonsky/FiraCode/releases/download/6.2/Fira_Code_v6.2.zip" -o /tmp/_firacode.zip && \
+	  unzip -jo /tmp/_firacode.zip "ttf/FiraCode-Regular.ttf" -d vendor/fonts/ && \
+	  rm /tmp/_firacode.zip
+	@echo "Downloading IBM Plex Sans..."
+	@curl -fsSL "https://github.com/IBM/plex/releases/download/%40ibm%2Fplex-sans%401.1.0/ibm-plex-sans.zip" -o /tmp/_plexsans.zip && \
+	  unzip -jo /tmp/_plexsans.zip "ibm-plex-sans/fonts/complete/ttf/IBMPlexSans-Regular.ttf" -d vendor/fonts/ && \
+	  rm /tmp/_plexsans.zip
+	@echo "Fonts ready in vendor/fonts/:"
+	@ls -lh vendor/fonts/

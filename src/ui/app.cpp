@@ -12,6 +12,8 @@
 #include <algorithm>
 #include <stdexcept>
 
+#include "../core/prefs.hpp"
+
 // ---- Arena sizing ------------------------------------------
 // Default: 2 GB slab. For files larger than ~1.3 GB combined
 // the user should be prompted (future work). Arena exhaustion
@@ -39,6 +41,13 @@ App::App() {
 
     filter_view_.set_filter(&filter_);
     filter_view_.set_on_filter_changed([this] { on_filter_changed(); });
+
+    prefs_view_.set_prefs(&prefs_);
+    prefs_view_.set_on_changed([this](const Prefs& p) {
+        prefs_ = p;
+        PrefsManager::save(p);
+        font_mgr_.rebuild_pending = true;
+    });
 }
 
 App::~App() {
@@ -103,6 +112,13 @@ bool App::init() {
 
     ImGui_ImplSDL2_InitForOpenGL(window_, gl_ctx_);
     ImGui_ImplOpenGL3_Init("#version 330 core");
+
+    // Load prefs and fonts
+    prefs_ = PrefsManager::load();
+    // vendor/fonts/ is relative to the working directory (project root)
+    std::string vendor_dir = "vendor/fonts";
+    font_mgr_.load(prefs_, vendor_dir);
+    prefs_view_.set_available_fonts(&font_mgr_.available_fonts());
 
     return true;
 }
@@ -181,6 +197,10 @@ void App::render_menu_bar() {
             if (ImGui::MenuItem("Open Cluster (drag & drop files)")) {}
             ImGui::Separator();
             if (ImGui::MenuItem("Quit", "Alt+F4")) running_ = false;
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Edit")) {
+            if (ImGui::MenuItem("Preferences\xe2\x80\xa6")) prefs_view_.show();
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Help")) {
@@ -334,6 +354,7 @@ void App::render_frame() {
 
     render_menu_bar();
     render_dockspace();     // three-column host with filter panel pinned in left column
+    prefs_view_.render();   // floating preferences window (no-op when closed)
 }
 
 // ------------------------------------------------------------
@@ -380,12 +401,20 @@ int App::run() {
             }
         }
 
+        // Rebuild font atlas if the user clicked Apply in Preferences.
+        // Must happen OUTSIDE a frame (before NewFrame).
+        if (font_mgr_.rebuild_pending)
+            font_mgr_.rebuild(prefs_, "vendor/fonts");
+
         // Start ImGui frame
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplSDL2_NewFrame();
         ImGui::NewFrame();
+        font_mgr_.push(); // apply the loaded font globally for this frame
 
         render_frame();
+
+        font_mgr_.pop();
 
         // Render
         ImGui::Render();

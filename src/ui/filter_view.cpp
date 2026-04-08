@@ -6,6 +6,8 @@
 #include <cctype>
 #include <algorithm>
 
+#include "../core/format.hpp"
+
 // ------------------------------------------------------------
 
 void FilterView::set_analysis(const AnalysisResult* analysis,
@@ -127,10 +129,11 @@ void FilterView::render_conn_section() {
         if (!str_contains_ci(label, conn_search_)) continue;
 
         bool checked = filter_->conn_id_include.count(ce.conn_id) > 0;
-        char chk_id[72];
-        std::snprintf(chk_id, sizeof(chk_id), "%s  (%llu)##ci%u",
+        char cnt_buf[27];
+        char chk_id[80];
+        std::snprintf(chk_id, sizeof(chk_id), "%s  (%s)##ci%u",
                       label,
-                      static_cast<unsigned long long>(ce.count),
+                      fmt_count_buf(ce.count, cnt_buf, sizeof(cnt_buf)),
                       ce.conn_id);
         if (ImGui::Checkbox(chk_id, &checked)) {
             if (checked)
@@ -183,10 +186,11 @@ void FilterView::render_driver_section() {
         uint32_t idx = const_cast<StringTable*>(strings_)->intern(de.label);
         bool checked = filter_->driver_idx_include.count(idx) > 0;
 
+        char dcnt_buf[27];
         char chk_id[256];
-        std::snprintf(chk_id, sizeof(chk_id), "%s  (%llu)##di%u",
+        std::snprintf(chk_id, sizeof(chk_id), "%s  (%s)##di%u",
                       de.label.c_str(),
-                      static_cast<unsigned long long>(de.count),
+                      fmt_count_buf(de.count, dcnt_buf, sizeof(dcnt_buf)),
                       idx);
         if (ImGui::Checkbox(chk_id, &checked)) {
             if (checked)

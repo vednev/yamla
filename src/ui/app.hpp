@@ -11,10 +11,13 @@ struct SDL_Window;
 typedef void* SDL_GLContext;
 
 #include "../analysis/cluster.hpp"
+#include "../core/prefs.hpp"
 #include "log_view.hpp"
 #include "detail_view.hpp"
 #include "breakdown_view.hpp"
 #include "filter_view.hpp"
+#include "font_manager.hpp"
+#include "prefs_view.hpp"
 
 // ------------------------------------------------------------
 //  App
@@ -67,6 +70,9 @@ private:
     DetailView      detail_view_;
     BreakdownView   breakdown_view_;
     FilterView      filter_view_;
+    FontManager     font_mgr_;
+    PrefsView       prefs_view_;
+    Prefs           prefs_;
 
     // Which mmap file data pointer to use for detail view
     // (We keep one MmapFile per node, but for v0.0.1 we re-open on demand
