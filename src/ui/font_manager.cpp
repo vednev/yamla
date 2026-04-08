@@ -56,7 +56,7 @@ bool FontManager::load_internal(const Prefs& prefs,
     if (available_.empty()) {
         io.Fonts->AddFontDefault();
         io.Fonts->Build();
-        if (destroy_first) ImGui_ImplOpenGL3_CreateFontsTexture();
+        ImGui_ImplOpenGL3_CreateFontsTexture();
         active_font_ = nullptr;
         return false;
     }
@@ -84,13 +84,16 @@ bool FontManager::load_internal(const Prefs& prefs,
 
     ImFont* font = io.Fonts->AddFontFromFileTTF(path.c_str(), size_px, &cfg);
     if (!font) {
-        // Loading failed — fall back to default
+        // Loading failed — fall back to ImGui's embedded default
         io.Fonts->Clear();
         io.Fonts->AddFontDefault();
     }
 
     io.Fonts->Build();
-    if (destroy_first) ImGui_ImplOpenGL3_CreateFontsTexture();
+    // Always upload to the GPU — on the initial load path the backend
+    // has not yet uploaded any font texture, so this is required.
+    // On rebuild the old texture was already destroyed above.
+    ImGui_ImplOpenGL3_CreateFontsTexture();
 
     active_font_ = font;
     vendor_dir_  = vendor_dir;
