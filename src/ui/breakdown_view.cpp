@@ -270,18 +270,27 @@ void BreakdownView::render_table_multi(const char* label, const CountMap& data,
 
     bool open = ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen);
 
-    // Per-section reset — only when the set is non-empty
-    bool section_active = filter_ && !(filter_->*set_field).empty();
-    char reset_id[64];
-    std::snprintf(reset_id, sizeof(reset_id), "##rst_%s", label);
-    char tooltip[128];
-    std::snprintf(tooltip, sizeof(tooltip), "Clear %s filter", label);
-    if (inline_reset("Clear", reset_id, section_active, tooltip)) {
-        (filter_->*set_field).clear();
-        if (on_filter_changed_) on_filter_changed_();
-    }
-
     if (open) {
+        // Per-section Clear button — rendered INSIDE the open body, not on the
+        // header row. This avoids fighting CollapsingHeader for click ownership.
+        bool section_active = filter_ && !(filter_->*set_field).empty();
+        if (section_active) {
+            float btn_w = ImGui::CalcTextSize("Clear").x
+                          + ImGui::GetStyle().FramePadding.x * 2.0f;
+            ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - btn_w - 2.0f);
+            ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.0f,  0.0f,  0.0f,  1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.18f, 0.06f, 0.06f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.28f, 0.08f, 0.08f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_Text,          ImVec4(0.85f, 0.25f, 0.25f, 1.0f));
+            bool clicked = ImGui::SmallButton("Clear##multi_rst");
+            ImGui::PopStyleColor(4);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Clear component filter");
+            if (clicked && filter_) {
+                (filter_->*set_field).clear();
+                if (on_filter_changed_) on_filter_changed_();
+            }
+        }
         ImGuiTableFlags tf = ImGuiTableFlags_RowBg         |
                              ImGuiTableFlags_BordersOuter   |
                              ImGuiTableFlags_ScrollY         |
