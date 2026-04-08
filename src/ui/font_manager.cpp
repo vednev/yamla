@@ -82,6 +82,17 @@ bool FontManager::load_internal(const Prefs& prefs,
     cfg.OversampleV = 2;
     cfg.PixelSnapH  = false;
 
+    // Include Basic Latin + Latin-1 Supplement + common typographic punctuation
+    // (en-dash, em-dash, ellipsis, smart quotes, etc.) so those glyphs never
+    // render as question marks.
+    static const ImWchar glyph_ranges[] = {
+        0x0020, 0x00FF,  // Basic Latin + Latin-1 Supplement
+        0x2013, 0x2026,  // en-dash, em-dash, ellipsis (…)
+        0x2018, 0x201F,  // smart quotes
+        0,
+    };
+    cfg.GlyphRanges = glyph_ranges;
+
     ImFont* font = io.Fonts->AddFontFromFileTTF(path.c_str(), size_px, &cfg);
     if (!font) {
         // Loading failed — fall back to ImGui's embedded default

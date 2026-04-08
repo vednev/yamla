@@ -190,9 +190,17 @@ void LogView::render_inner() {
                               t.tm_year+1900, t.tm_mon+1, t.tm_mday,
                               t.tm_hour, t.tm_min, t.tm_sec, ms);
 
+                // Push the pastel colour as the Header (selected-selectable fill)
+                // so the Selectable's own background draw uses it instead of black.
+                // Also push it for HeaderHovered so hovering a selected row stays pastel.
+                static const ImVec4 pastel = ImGui::ColorConvertU32ToFloat4(SEL_ROW_BG);
+                ImGui::PushStyleColor(ImGuiCol_Header,        pastel);
+                ImGui::PushStyleColor(ImGuiCol_HeaderHovered, pastel);
+                ImGui::PushStyleColor(ImGuiCol_HeaderActive,  pastel);
                 bool clicked = ImGui::Selectable("##row", is_selected,
                                                  ImGuiSelectableFlags_SpanAllColumns,
                                                  ImVec2(0, 0));
+                ImGui::PopStyleColor(3);
                 ImGui::SameLine();
 
                 // Timestamp in severity colour on normal rows, black on selected
