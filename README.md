@@ -9,20 +9,20 @@ inspecting and filtering MongoDB 4.4+ structured JSON logs.
 
 ## Screenshots
 
-**Start screen**
+**Start screen** — drop one or more `mongod` log files onto the window to begin.
 ![Start screen](screenshots/start_screen.png)
 
-**Loading progress**
-![Loading progress](screenshots/loading_progress_screen.png)
-
-**Post-load overview — breakdown panels, log list, filter panel**
+**Post-load overview** — breakdown charts and tables on the left, virtual-scroll log list in the centre, entry detail panel on the right. Connection ID and driver filters sit below the breakdowns.
 ![Post-load screen](screenshots/post_load_screen.png)
 
-**Severity filter active — bar chart highlight and filtered log list**
-![Severity filter](screenshots/detail_view_severity_filter.png)
+**Slow query filter** — clicking the "Slow queries" counter narrows the log list to only entries where `durationMillis > 100`, highlighted in amber.
+![Slow query filter](screenshots/slow_query_filter.png)
 
-**Detail view — log entry inspected as a formatted JSON tree**
-![Detail view](screenshots/detail_view_log_entry.png)
+**Single filter active** — selecting a severity, component, or any other category highlights the active row in pastel blue and filters the log list in real time. A per-section Clear button removes the filter.
+![Single filter](screenshots/single_filter.png)
+
+**Multiple filters and text search** — filters compose: here a component selection and a text search are applied simultaneously, with the entry count showing the narrowed result set.
+![Multi-filter and search](screenshots/multi_filter_and_search.png)
 
 ## Dependencies
 
@@ -59,7 +59,7 @@ make run
 ./yamla
 ```
 
-The app starts maximised. Drag one or more MongoDB log files onto the window
+The app opens at 1920×1080. Drag one or more MongoDB log files onto the window
 to load them. Multiple files are treated as a single replica-set cluster and
 merged by timestamp.
 
