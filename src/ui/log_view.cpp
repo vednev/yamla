@@ -71,6 +71,8 @@ bool LogView::entry_matches(const LogEntry& e) const {
         !filter_->conn_id_include.count(e.conn_id)) return false;
     if (!filter_->driver_idx_include.empty() &&
         !filter_->driver_idx_include.count(e.driver_idx)) return false;
+    if (!filter_->node_idx_include.empty() &&
+        !filter_->node_idx_include.count(e.node_idx)) return false;
 
     if (!filter_->text_search.empty() && strings_) {
         std::string_view msg = strings_->get(e.msg_idx);

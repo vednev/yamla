@@ -129,6 +129,14 @@ void BreakdownView::render_bar_chart(const char* label, const CountMap& data,
                               ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_NoLabel |
                               ImPlotAxisFlags_NoTickMarks);
 
+            // Compact K/M/B formatter for X-axis tick labels
+            ImPlot::SetupAxisFormat(ImAxis_X1, [](double value, char* buf, int size, void*) -> int {
+                if (value < 0) { buf[0] = '0'; buf[1] = '\0'; return 1; }
+                char tmp[16];
+                fmt_compact(static_cast<uint64_t>(value), tmp, sizeof(tmp));
+                return std::snprintf(buf, static_cast<size_t>(size), "%s", tmp);
+            }, nullptr);
+
             double max_val = 0;
             for (size_t i = 0; i < N; ++i)
                 if (values[i] > max_val) max_val = values[i];

@@ -278,6 +278,7 @@ void App::start_load(const std::vector<std::string>& paths) {
     log_view_.set_entries(nullptr, 0, nullptr, nullptr); // clear raw ptr to old arena
     breakdown_view_.set_analysis(nullptr, nullptr);
     filter_view_.set_analysis(nullptr, nullptr);
+    filter_view_.set_nodes(nullptr);
     node_files_.clear();
     total_file_bytes_   = 0;
     load_duration_s_    = 0.0;
@@ -578,6 +579,7 @@ void App::render_frame() {
                                           &cluster_->strings());
             filter_view_.set_analysis(&cluster_->analysis(),
                                        &cluster_->strings());
+            filter_view_.set_nodes(&cluster_->nodes());
         }
         last_cluster_state_ = cur;
     }

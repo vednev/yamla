@@ -16,16 +16,15 @@ void FilterView::set_analysis(const AnalysisResult* analysis,
     analysis_ = analysis;
     strings_  = strings;
 
-    // Reset include sets to empty on every new data load.
-    // Empty = no filter active = all entries visible.
-    // The checkboxes will render as all-unchecked by default.
     if (filter_) {
         filter_->conn_id_include.clear();
         filter_->driver_idx_include.clear();
-        // Don't call on_filter_changed_ here — the log view is being
-        // set up simultaneously from render_frame; it will build its
-        // index after all views are initialised.
+        filter_->node_idx_include.clear();
     }
+}
+
+void FilterView::set_nodes(const std::vector<NodeInfo>* nodes) {
+    nodes_ = nodes;
 }
 
 void FilterView::set_filter(FilterState* filter) {
@@ -219,6 +218,69 @@ void FilterView::render_driver_section() {
 }
 
 // ------------------------------------------------------------
+//  render_node_section
+// ------------------------------------------------------------
+void FilterView::render_node_section() {
+    if (!nodes_ || nodes_->empty() || !filter_) return;
+
+    // Only show this section when there is more than one node — with a
+    // single node the filter is pointless.
+    if (nodes_->size() < 2) return;
+
+    ImGui::Separator();
+    ImGui::Text("Nodes (%zu)", nodes_->size());
+
+    // Right-align a None button
+    {
+        float btn_w = ImGui::CalcTextSize("None").x
+                      + ImGui::GetStyle().FramePadding.x * 2 + 4;
+        ImGui::SameLine();
+        ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - btn_w);
+        if (ImGui::SmallButton("None##nd")) {
+            filter_->node_idx_include.clear();
+            if (on_filter_changed_) on_filter_changed_();
+        }
+    }
+
+    // Per-node checkbox with colour swatch + hostname label
+    float avail_h  = ImGui::GetContentRegionAvail().y;
+    float list_h   = std::min(avail_h - 4.0f,
+                              22.0f * static_cast<float>(nodes_->size()) + 8.0f);
+    list_h = std::max(list_h, 40.0f);
+
+    ImGui::BeginChild("##node_list", ImVec2(-1, list_h), true);
+
+    for (const auto& node : *nodes_) {
+        bool checked = filter_->node_idx_include.count(
+                           static_cast<uint16_t>(node.idx)) > 0;
+
+        // Colour swatch — small square in the node's pastel colour
+        ImVec4 col(node.color.r, node.color.g, node.color.b, 1.0f);
+        ImGui::ColorButton("##nc",
+            col,
+            ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoBorder,
+            ImVec2(12, 12));
+        ImGui::SameLine(0, 6);
+
+        // Hostname label with unique ID
+        const std::string& host = node.hostname.empty() ? node.path : node.hostname;
+        char chk_id[512];
+        std::snprintf(chk_id, sizeof(chk_id), "%s##nd%u",
+                      host.c_str(), node.idx);
+
+        if (ImGui::Checkbox(chk_id, &checked)) {
+            if (checked)
+                filter_->node_idx_include.insert(static_cast<uint16_t>(node.idx));
+            else
+                filter_->node_idx_include.erase(static_cast<uint16_t>(node.idx));
+            if (on_filter_changed_) on_filter_changed_();
+        }
+    }
+
+    ImGui::EndChild();
+}
+
+// ------------------------------------------------------------
 //  render_inner — contents only, embedded in a parent child window
 // ------------------------------------------------------------
 void FilterView::render_inner() {
@@ -226,6 +288,7 @@ void FilterView::render_inner() {
         ImGui::TextDisabled("Load a cluster to see filters.");
         return;
     }
+    render_node_section();
     render_conn_section();
     render_driver_section();
 }

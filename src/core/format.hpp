@@ -54,3 +54,36 @@ inline const char* fmt_count_buf(uint64_t n, char* buf, size_t buf_len) {
     fmt_count_into(n, buf, buf_len);
     return buf;
 }
+
+// ------------------------------------------------------------
+//  fmt_compact — short SI-suffix form for axis / chart labels
+//
+//  Keeps labels short so they don't clobber each other when
+//  counts reach the millions.
+//
+//    0–999           → "999"
+//    1,000–999,999   → "1.2K"  (1 decimal, drop trailing .0)
+//    1M–999M         → "1.2M"
+//    1B+             → "1.2B"
+//
+//  Writes into caller-supplied buf (at least 16 bytes).
+// ------------------------------------------------------------
+inline const char* fmt_compact(uint64_t n, char* buf, size_t buf_len) {
+    // Helper: format with 1 decimal, but strip trailing ".0"
+    auto fmt1 = [&](double v, char suffix) {
+        // At >= 100 the single decimal adds no useful precision
+        if (v >= 100.0)
+            std::snprintf(buf, buf_len, "%.0f%c", v, suffix);
+        else if (static_cast<int>(v * 10 + 0.5) % 10 == 0)
+            std::snprintf(buf, buf_len, "%.0f%c", v, suffix);
+        else
+            std::snprintf(buf, buf_len, "%.1f%c", v, suffix);
+    };
+
+    if      (n < 1000ULL)        std::snprintf(buf, buf_len, "%llu",
+                                     static_cast<unsigned long long>(n));
+    else if (n < 1000000ULL)     fmt1(static_cast<double>(n) / 1e3,  'K');
+    else if (n < 1000000000ULL)  fmt1(static_cast<double>(n) / 1e6,  'M');
+    else                          fmt1(static_cast<double>(n) / 1e9,  'B');
+    return buf;
+}

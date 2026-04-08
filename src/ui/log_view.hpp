@@ -38,8 +38,9 @@ struct FilterState {
 
     // Set-based inclusion filters from the Filter panel.
     // Empty set = no filter active (show all).
-    std::unordered_set<uint32_t> conn_id_include;     // raw conn_id values
-    std::unordered_set<uint32_t> driver_idx_include;  // StringTable indices
+    std::unordered_set<uint32_t>  conn_id_include;    // raw conn_id values
+    std::unordered_set<uint32_t>  driver_idx_include; // StringTable indices
+    std::unordered_set<uint16_t>  node_idx_include;   // node indices (NodeInfo::idx)
 
     bool active() const {
         return !text_search.empty()              ||
@@ -51,7 +52,8 @@ struct FilterState {
                shape_idx       != 0             ||
                slow_query_only                  ||
                !conn_id_include.empty()         ||
-               !driver_idx_include.empty();
+               !driver_idx_include.empty()      ||
+               !node_idx_include.empty();
     }
 
     void clear() { *this = FilterState{}; }

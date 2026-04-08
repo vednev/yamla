@@ -1,25 +1,13 @@
 #pragma once
 
 #include <functional>
+#include <vector>
 #include "../analysis/analyzer.hpp"
+#include "../analysis/cluster.hpp"
 #include "log_view.hpp"
 
 // ------------------------------------------------------------
-//  FilterView
-//
-//  Renders two checkbox lists embedded inside the left panel:
-//    1. Connection IDs  — unique conn IDs from the loaded cluster
-//    2. Driver types    — unique driver name+version strings
-//
-//  Inclusion model:
-//    - Empty include set  → filter inactive, all entries shown.
-//    - Non-empty set      → show only entries whose value is in
-//                           the set.
-//
-//  Default on load: all checkboxes unchecked (empty sets).
-//  Checking any box narrows the log view to only those items.
-//  "All" button fills the set (selects everything).
-//  "None" button empties the set (deselects everything = show all).
+//  FilterView — connection IDs, driver types, and node filter
 // ------------------------------------------------------------
 class FilterView {
 public:
@@ -29,6 +17,7 @@ public:
 
     void set_analysis(const AnalysisResult* analysis,
                       const StringTable* strings);
+    void set_nodes(const std::vector<NodeInfo>* nodes);
     void set_filter(FilterState* filter);
     void set_on_filter_changed(FilterChangedCb cb);
 
@@ -36,6 +25,7 @@ public:
     void render_inner();
 
 private:
+    void render_node_section();
     void render_conn_section();
     void render_driver_section();
 
@@ -44,10 +34,11 @@ private:
     void select_all_driver();
     void clear_all_driver();
 
-    const AnalysisResult* analysis_ = nullptr;
-    const StringTable*    strings_  = nullptr;
-    FilterState*          filter_   = nullptr;
-    FilterChangedCb       on_filter_changed_;
+    const AnalysisResult*        analysis_ = nullptr;
+    const StringTable*           strings_  = nullptr;
+    const std::vector<NodeInfo>* nodes_    = nullptr;
+    FilterState*                 filter_   = nullptr;
+    FilterChangedCb              on_filter_changed_;
 
     char conn_search_[128]   = {};
     char driver_search_[128] = {};
