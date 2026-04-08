@@ -114,18 +114,40 @@ void LogView::render_inner() {
     // ---- Search bar ----------------------------------------
     if (filter_) {
         static char search_buf[256] = {};
-        bool changed = ImGui::InputText("Search", search_buf, sizeof(search_buf));
+
+        // Measure the Clear button width so the input can fill remaining space
+        const char* clear_label = "Clear";
+        float btn_w = ImGui::CalcTextSize(clear_label).x
+                      + ImGui::GetStyle().FramePadding.x * 2.0f + 8.0f;
+        float input_w = ImGui::GetContentRegionAvail().x - btn_w
+                        - ImGui::GetStyle().ItemSpacing.x;
+
+        ImGui::SetNextItemWidth(input_w);
+        bool changed = ImGui::InputText("##search", search_buf, sizeof(search_buf));
+
         ImGui::SameLine();
-        if (ImGui::Button("Clear")) {
+
+        // Pastel olive green for the Clear button
+        ImGui::PushStyleColor(ImGuiCol_Button,
+            ImVec4(0.45f, 0.52f, 0.25f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+            ImVec4(0.55f, 0.63f, 0.32f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,
+            ImVec4(0.35f, 0.42f, 0.18f, 1.0f));
+        if (ImGui::Button(clear_label)) {
             filter_->clear();
             std::memset(search_buf, 0, sizeof(search_buf));
             rebuild_filter_index();
         }
+        ImGui::PopStyleColor(3);
+
         if (changed) {
             filter_->text_search = search_buf;
             rebuild_filter_index();
         }
-        ImGui::Text("%zu / %zu entries",
+
+        ImGui::Spacing();
+        ImGui::TextDisabled("%zu / %zu entries",
                     filtered_indices_.size(), count_);
         ImGui::Separator();
     }

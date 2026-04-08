@@ -73,10 +73,10 @@ bool App::init() {
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
 
     SDL_WindowFlags flags = static_cast<SDL_WindowFlags>(
-        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_MAXIMIZED);
+        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
     window_ = SDL_CreateWindow("YAMLA — MongoDB Log Analyzer",
                                 SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                                1440, 900, flags);
+                                1024, 768, flags);
     if (!window_) {
         std::fprintf(stderr, "SDL_CreateWindow error: %s\n", SDL_GetError());
         return false;
@@ -122,10 +122,13 @@ bool App::init() {
     style.PopupBorderSize   = 1.0f;
     style.TabBorderSize     = 1.0f;
 
-    // Slightly more padding so content doesn't feel cramped against the border
-    style.FramePadding      = ImVec2(6, 4);
-    style.WindowPadding     = ImVec2(6, 6);
-    style.ItemSpacing       = ImVec2(8, 4);
+    // Generous padding for a clean, breathable layout
+    style.FramePadding      = ImVec2(8, 5);
+    style.WindowPadding     = ImVec2(10, 8);
+    style.ItemSpacing       = ImVec2(8, 6);
+    style.ItemInnerSpacing  = ImVec2(6, 4);
+    style.CellPadding       = ImVec2(6, 4);
+    style.IndentSpacing     = 16.0f;
 
     // --- Palette convenience ----------------------------------------
     const ImVec4 black      = ImVec4(0.00f, 0.00f, 0.00f, 1.00f);
@@ -141,8 +144,9 @@ bool App::init() {
     style.Colors[ImGuiCol_PopupBg]           = black;
     style.Colors[ImGuiCol_MenuBarBg]         = black;
 
-    // --- Borders ----------------------------------------------------
-    style.Colors[ImGuiCol_Border]            = white;
+    // --- Borders — medium gray, reduces visual noise vs pure white ---
+    const ImVec4 border_gray = ImVec4(0.35f, 0.35f, 0.35f, 1.00f);
+    style.Colors[ImGuiCol_Border]            = border_gray;
     style.Colors[ImGuiCol_BorderShadow]      = clear;
 
     // --- Text -------------------------------------------------------
@@ -199,17 +203,17 @@ bool App::init() {
     style.Colors[ImGuiCol_ResizeGripHovered] = white;
     style.Colors[ImGuiCol_ResizeGripActive]  = white;
 
-    // --- Separators -------------------------------------------------
-    style.Colors[ImGuiCol_Separator]         = white;
-    style.Colors[ImGuiCol_SeparatorHovered]  = white;
-    style.Colors[ImGuiCol_SeparatorActive]   = white;
+    // --- Separators — match border gray -----------------------------
+    style.Colors[ImGuiCol_Separator]         = border_gray;
+    style.Colors[ImGuiCol_SeparatorHovered]  = ImVec4(0.55f, 0.55f, 0.55f, 1.00f);
+    style.Colors[ImGuiCol_SeparatorActive]   = ImVec4(0.70f, 0.70f, 0.70f, 1.00f);
 
-    // --- Table ------------------------------------------------------
-    style.Colors[ImGuiCol_TableHeaderBg]        = black;
-    style.Colors[ImGuiCol_TableBorderStrong]     = white;
-    style.Colors[ImGuiCol_TableBorderLight]      = dim;
-    style.Colors[ImGuiCol_TableRowBg]            = black;
-    style.Colors[ImGuiCol_TableRowBgAlt]         = dark_gray;
+    // --- Table — gray borders match child border gray ---------------
+    style.Colors[ImGuiCol_TableHeaderBg]         = black;
+    style.Colors[ImGuiCol_TableBorderStrong]      = border_gray;
+    style.Colors[ImGuiCol_TableBorderLight]       = ImVec4(0.22f, 0.22f, 0.22f, 1.00f);
+    style.Colors[ImGuiCol_TableRowBg]             = black;
+    style.Colors[ImGuiCol_TableRowBgAlt]          = dark_gray;
 
     // --- Nav highlight (keyboard focus) ----------------------------
     style.Colors[ImGuiCol_NavHighlight]      = white;
@@ -327,38 +331,49 @@ void App::render_menu_bar() {
             ImGui::EndMenu();
         }
 
-        // Show load status in menu bar (stats persist after load; popup handles progress)
-        if (cluster_) {
-            ImGui::SetCursorPosX(ImGui::GetIO().DisplaySize.x - 460.0f);
-            switch (cluster_->state()) {
-                case LoadState::Loading:
-                    ImGui::TextDisabled("Loading...");
-                    break;
-                case LoadState::Ready: {
-                    size_t n = cluster_->entries().size();
-                    // Format file size as MB or GB
-                    char size_buf[32];
-                    if (total_file_bytes_ >= 1024ull * 1024 * 1024) {
-                        std::snprintf(size_buf, sizeof(size_buf), "%.2f GB",
-                            static_cast<double>(total_file_bytes_) / (1024.0 * 1024.0 * 1024.0));
-                    } else {
-                        std::snprintf(size_buf, sizeof(size_buf), "%.1f MB",
-                            static_cast<double>(total_file_bytes_) / (1024.0 * 1024.0));
+        // Show load status — right-aligned, gray tone
+        {
+            const ImVec4 stat_color = ImVec4(0.55f, 0.55f, 0.55f, 1.0f);
+            char stat_buf[128] = {};
+
+            if (cluster_) {
+                switch (cluster_->state()) {
+                    case LoadState::Loading:
+                        std::snprintf(stat_buf, sizeof(stat_buf), "Loading...");
+                        break;
+                    case LoadState::Ready: {
+                        char size_buf[32];
+                        if (total_file_bytes_ >= 1024ull * 1024 * 1024)
+                            std::snprintf(size_buf, sizeof(size_buf), "%.2f GB",
+                                static_cast<double>(total_file_bytes_) / (1024.0*1024.0*1024.0));
+                        else
+                            std::snprintf(size_buf, sizeof(size_buf), "%.1f MB",
+                                static_cast<double>(total_file_bytes_) / (1024.0*1024.0));
+                        std::snprintf(stat_buf, sizeof(stat_buf),
+                            "%zu entries  |  %s  |  %.2fs",
+                            cluster_->entries().size(), size_buf, load_duration_s_);
+                        break;
                     }
-                    ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f),
-                                       "%zu entries  |  %s  |  %.2fs",
-                                       n, size_buf, load_duration_s_);
-                    break;
+                    case LoadState::Error:
+                        std::snprintf(stat_buf, sizeof(stat_buf),
+                            "Error: %s", cluster_->error().c_str());
+                        break;
+                    default:
+                        std::snprintf(stat_buf, sizeof(stat_buf),
+                            "Drop MongoDB log files here to begin");
+                        break;
                 }
-                case LoadState::Error:
-                    ImGui::TextColored(ImVec4(1,0.3f,0.3f,1),
-                                       "Error: %s", cluster_->error().c_str());
-                    break;
-                default: break;
+            } else {
+                std::snprintf(stat_buf, sizeof(stat_buf),
+                    "Drop MongoDB log files here to begin");
             }
-        } else {
-            ImGui::SetCursorPosX(ImGui::GetIO().DisplaySize.x - 320.0f);
-            ImGui::TextDisabled("Drop MongoDB log files here to begin");
+
+            float text_w = ImGui::CalcTextSize(stat_buf).x;
+            float margin = 8.0f;
+            ImGui::SetCursorPosX(ImGui::GetIO().DisplaySize.x - text_w - margin);
+            ImGui::PushStyleColor(ImGuiCol_Text, stat_color);
+            ImGui::TextUnformatted(stat_buf);
+            ImGui::PopStyleColor();
         }
 
         ImGui::EndMainMenuBar();
