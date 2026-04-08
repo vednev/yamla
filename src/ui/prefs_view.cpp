@@ -31,14 +31,17 @@ void PrefsView::show() {
 void PrefsView::render() {
     if (!open_) return;
 
-    ImGui::SetNextWindowSize(ImVec2(360, 210), ImGuiCond_FirstUseEver);
+    // Auto-fit: let ImGui compute the needed height each frame rather than
+    // using a fixed height that clips content when padding/font size changes.
+    ImGui::SetNextWindowSize(ImVec2(380, 0), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowPos(
-        ImVec2(ImGui::GetIO().DisplaySize.x * 0.5f - 180.0f,
-               ImGui::GetIO().DisplaySize.y * 0.5f - 105.0f),
+        ImVec2(ImGui::GetIO().DisplaySize.x * 0.5f - 190.0f,
+               ImGui::GetIO().DisplaySize.y * 0.5f - 140.0f),
         ImGuiCond_FirstUseEver);
 
-    ImGuiWindowFlags flags =
-        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse;
+    // NoResize removed so the user can adjust if needed; height=0 means auto
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoCollapse |
+                             ImGuiWindowFlags_AlwaysAutoResize;
 
     if (!ImGui::Begin("Preferences", &open_, flags)) {
         ImGui::End();
