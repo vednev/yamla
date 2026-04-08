@@ -230,12 +230,16 @@ ParseResult LogParser::parse_batch(const ParseBatch& batch) {
             (void)t_field.get_string().get(ts);
         e.timestamp_ms = parse_timestamp(ts);
 
-        // severity
-        // stage() copies the string_view bytes into tl_batch.owned (deque)
-        // and returns a stable string_view into that storage.
-        // This is required because simdjson's tape (from which get_string()
-        // returns string_views) is invalidated when the iterator advances
-        // to the next document in parse_many.
+        // severity — read immediately from the tape and convert to enum;
+        // we only need the first character so no string copy is needed.
+        {
+            std::string_view sev;
+            if (doc["s"].get_string().get(sev) == simdjson::SUCCESS && !sev.empty())
+                e.severity = severity_from_char(sev[0]);
+        }
+
+        // All remaining string fields are staged via tl_batch.stage() which
+        // copies bytes into the deque for stability across iterator advances.
         std::string_view v;
         if (doc["c"].get_string().get(v)  == simdjson::SUCCESS) sv.comp = tl_batch.stage(v);
         if (doc["ctx"].get_string().get(v) == simdjson::SUCCESS) e.conn_id = parse_conn_id(v);
