@@ -132,6 +132,9 @@ void App::start_load(const std::vector<std::string>& paths) {
     filter_.clear();
     detail_view_.set_entry(nullptr, nullptr, nullptr);
     node_files_.clear();
+    total_file_bytes_ = 0;
+    load_duration_s_  = 0.0;
+    load_start_       = std::chrono::steady_clock::now();
 
     // Compute total file size to size the arena
     size_t total_bytes = 0;
@@ -144,6 +147,7 @@ void App::start_load(const std::vector<std::string>& paths) {
             std::fprintf(stderr, "Cannot open %s: %s\n", p.c_str(), ex.what());
         }
     }
+    total_file_bytes_ = total_bytes;
 
     // Arena: 1.5× file size, at least 256 MB, at most DEFAULT_ARENA_BYTES
     size_t arena_bytes = std::max<size_t>(
@@ -183,7 +187,7 @@ void App::render_menu_bar() {
 
         // Show load status in menu bar
         if (cluster_) {
-            ImGui::SetCursorPosX(ImGui::GetIO().DisplaySize.x - 320.0f);
+            ImGui::SetCursorPosX(ImGui::GetIO().DisplaySize.x - 460.0f);
             switch (cluster_->state()) {
                 case LoadState::Loading: {
                     float p = cluster_->progress();
@@ -194,8 +198,18 @@ void App::render_menu_bar() {
                 }
                 case LoadState::Ready: {
                     size_t n = cluster_->entries().size();
+                    // Format file size as MB or GB
+                    char size_buf[32];
+                    if (total_file_bytes_ >= 1024ull * 1024 * 1024) {
+                        std::snprintf(size_buf, sizeof(size_buf), "%.2f GB",
+                            static_cast<double>(total_file_bytes_) / (1024.0 * 1024.0 * 1024.0));
+                    } else {
+                        std::snprintf(size_buf, sizeof(size_buf), "%.1f MB",
+                            static_cast<double>(total_file_bytes_) / (1024.0 * 1024.0));
+                    }
                     ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f),
-                                       "%zu entries loaded", n);
+                                       "%zu entries  |  %s  |  %.2fs",
+                                       n, size_buf, load_duration_s_);
                     break;
                 }
                 case LoadState::Error:
@@ -279,6 +293,10 @@ void App::render_frame() {
     if (cluster_) {
         LoadState cur = cluster_->state();
         if (cur != last_state && cur == LoadState::Ready) {
+            auto now = std::chrono::steady_clock::now();
+            load_duration_s_ = std::chrono::duration<double>(
+                now - load_start_).count();
+
             const auto& entries = cluster_->entries();
             const auto& nodes   = cluster_->nodes();
             log_view_.set_entries(entries.data(), entries.size(),

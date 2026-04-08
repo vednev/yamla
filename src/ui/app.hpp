@@ -4,6 +4,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <chrono>
 
 // Forward-declare SDL types to avoid polluting headers
 struct SDL_Window;
@@ -73,6 +74,11 @@ private:
     std::vector<std::unique_ptr<MmapFile>> node_files_;
 
     bool running_ = true;
+
+    // Load statistics displayed in the menu bar
+    size_t total_file_bytes_ = 0;
+    double load_duration_s_  = 0.0;
+    std::chrono::steady_clock::time_point load_start_;
 
     // Pending drag-and-drop file paths (accumulated between SDL_DROPFILE
     // and SDL_DROPCOMPLETE events)

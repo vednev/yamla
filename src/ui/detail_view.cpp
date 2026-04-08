@@ -131,15 +131,24 @@ void DetailView::render_inner() {
     const char* raw  = file_data_ + entry_->raw_offset;
     size_t      rlen = entry_->raw_len;
 
+    // simdjson requires SIMDJSON_PADDING extra readable bytes after the
+    // input buffer. Raw mmap pointers do not guarantee this, so we copy
+    // the line into a padded_string before parsing.
+    simdjson::padded_string padded(raw, rlen);
+
     simdjson::dom::element doc;
-    auto err = tl_parser.parse(raw, rlen).get(doc);
+    auto err = tl_parser.parse(padded).get(doc);
     if (err) {
         ImGui::TextColored(ImVec4(1,0.3f,0.3f,1), "Parse error: %s",
                            simdjson::error_message(err));
         return;
     }
 
+    // Wrap in a scrollable region so large documents don't overflow the panel
+    ImGui::BeginChild("##detail_scroll", ImVec2(0, 0), false,
+                      ImGuiWindowFlags_HorizontalScrollbar);
     render_object("document", doc, /*default_open=*/true);
+    ImGui::EndChild();
 }
 
 void DetailView::render() {

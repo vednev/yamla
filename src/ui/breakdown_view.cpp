@@ -63,23 +63,19 @@ void BreakdownView::render_bar_chart(const char* label, const CountMap& data,
             uint32_t current = filter_ ? (filter_->*field) : 0;
 
             for (size_t i = 0; i < N; ++i) {
-                // Determine if this bar is the active filter
                 uint32_t bar_val = is_severity
-                    ? static_cast<uint32_t>(i) + 1  // 1-based for severity
-                    : 0; // not used for non-severity (handled separately)
+                    ? static_cast<uint32_t>(i) + 1
+                    : 0;
 
-                bool active = filter_ &&
-                    (is_severity
-                        ? (current == bar_val)
-                        : false); // see table version for non-severity
+                bool active = filter_ && is_severity && (current == bar_val);
 
                 ImPlot::PushStyleColor(ImPlotCol_Fill,
                     active ? ImVec4(1.0f, 0.7f, 0.2f, 1.0f)
                            : ImVec4(0.3f, 0.6f, 0.9f, 0.85f));
 
-                double y  = static_cast<double>(i);
-                double xs = 0;
-                ImPlot::PlotBars("##", &xs, &y, 1,
+                double y = static_cast<double>(i);
+                // values[i] is the bar length (count); y is its position on Y axis
+                ImPlot::PlotBars("##", &values[i], &y, 1,
                                  0.6, ImPlotBarsFlags_Horizontal);
                 ImPlot::PopStyleColor();
             }
