@@ -10,8 +10,16 @@ CONAN_PC := build/conan
 IMGUI_PKG  := $(shell PKG_CONFIG_PATH=$(CONAN_PC) pkg-config --variable=prefix imgui 2>/dev/null)
 IMGUI_BIND := $(IMGUI_PKG)/res/bindings
 
-PKG_CFLAGS := $(shell PKG_CONFIG_PATH=$(CONAN_PC) pkg-config --cflags imgui implot sdl2 simdjson 2>/dev/null)
-PKG_LIBS   := $(shell PKG_CONFIG_PATH=$(CONAN_PC) pkg-config --libs   imgui implot sdl2 simdjson 2>/dev/null)
+# Use Conan for imgui, implot, simdjson.
+# Use the system (Homebrew) SDL2 to avoid macOS version mismatch crashes
+# from the Conan-prebuilt SDL2 (built for macOS 26, mismatches the runtime).
+CONAN_CFLAGS := $(shell PKG_CONFIG_PATH=$(CONAN_PC) pkg-config --cflags imgui implot simdjson 2>/dev/null)
+CONAN_LIBS   := $(shell PKG_CONFIG_PATH=$(CONAN_PC) pkg-config --libs   imgui implot simdjson 2>/dev/null)
+SDL2_CFLAGS  := $(shell pkg-config --cflags sdl2 2>/dev/null)
+SDL2_LIBS    := $(shell pkg-config --libs   sdl2 2>/dev/null)
+
+PKG_CFLAGS := $(CONAN_CFLAGS) $(SDL2_CFLAGS)
+PKG_LIBS   := $(CONAN_LIBS)   $(SDL2_LIBS)
 
 CXXFLAGS := -std=c++17 -O2 -Wall -Wextra -Wno-unused-parameter \
             -Isrc \
