@@ -24,39 +24,54 @@ void Cluster::add_file(const std::string& path) {
 }
 
 // ------------------------------------------------------------
-//  infer_hostname — scan first ~4KB of the file for "host" field
+//  infer_hostname — scan first ~8KB of the file for "host" field.
+//  Uses padded_string to satisfy SIMDJSON_PADDING requirement.
+//  Falls back to the filename stem if no host field is found.
 // ------------------------------------------------------------
-std::string Cluster::infer_hostname(const MmapFile& file) {
-    if (file.size() == 0) return "unknown";
+std::string Cluster::infer_hostname(const MmapFile& file,
+                                     const std::string& path) {
+    if (file.size() > 0) {
+        size_t scan_len = std::min<size_t>(file.size(), 8192);
+        const char* p   = file.data();
+        const char* end = p + scan_len;
 
-    // Only scan the first 4 KB
-    size_t scan_len = std::min<size_t>(file.size(), 4096);
-    const char* p   = file.data();
-    const char* end = p + scan_len;
+        simdjson::dom::parser parser;
 
-    simdjson::dom::parser parser;
+        while (p < end) {
+            const char* nl = static_cast<const char*>(
+                std::memchr(p, '\n', static_cast<size_t>(end - p)));
+            size_t line_len = nl ? static_cast<size_t>(nl - p)
+                                 : static_cast<size_t>(end - p);
 
-    while (p < end) {
-        const char* nl = static_cast<const char*>(
-            std::memchr(p, '\n', static_cast<size_t>(end - p)));
-        size_t line_len = nl ? static_cast<size_t>(nl - p)
-                             : static_cast<size_t>(end - p);
-
-        if (line_len > 0 && p[0] == '{') {
-            simdjson::dom::element doc;
-            if (parser.parse(p, line_len).get(doc) == simdjson::SUCCESS) {
-                std::string_view host;
-                if (doc["host"].get_string().get(host) == simdjson::SUCCESS &&
-                    !host.empty())
-                {
-                    return std::string(host);
+            if (line_len > 0 && p[0] == '{') {
+                // Use padded_string so simdjson can read SIMDJSON_PADDING
+                // bytes past the end without undefined behaviour
+                simdjson::padded_string ps(p, line_len);
+                simdjson::dom::element doc;
+                if (parser.parse(ps).get(doc) == simdjson::SUCCESS) {
+                    std::string_view host;
+                    if (doc["host"].get_string().get(host) == simdjson::SUCCESS
+                        && !host.empty())
+                    {
+                        return std::string(host);
+                    }
                 }
             }
+            if (!nl) break;
+            p = nl + 1;
         }
-        if (!nl) break;
-        p = nl + 1;
     }
-    return "unknown";
+
+    // No host field found — derive a readable name from the file path.
+    // Take the last path component and strip the extension.
+    std::string stem = path;
+    // Strip directory
+    size_t slash = stem.rfind('/');
+    if (slash != std::string::npos) stem = stem.substr(slash + 1);
+    // Strip extension (last '.' onwards)
+    size_t dot = stem.rfind('.');
+    if (dot != std::string::npos) stem = stem.substr(0, dot);
+    return stem.empty() ? path : stem;
 }
 
 // ------------------------------------------------------------
@@ -152,8 +167,8 @@ void Cluster::load() {
         for (uint16_t i = 0; i < n; ++i) {
             MmapFile file(file_paths_[i]);
 
-            // Infer hostname from log content
-            nodes_[i].hostname = infer_hostname(file);
+            // Infer hostname from log content; fall back to filename stem
+            nodes_[i].hostname = infer_hostname(file, file_paths_[i]);
 
             float base = static_cast<float>(i) * file_weight;
             parser.parse_file(file, i, *entries_,

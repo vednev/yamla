@@ -105,8 +105,9 @@ public:
     const AnalysisResult&        analysis()   const { return analysis_; }
     const std::vector<NodeInfo>& nodes()      const { return nodes_; }
 
-    // Infer hostname from the first few log lines of a file
-    static std::string infer_hostname(const MmapFile& file);
+    // Infer hostname from the first few log lines; falls back to filename stem
+    static std::string infer_hostname(const MmapFile& file,
+                                      const std::string& path);
 
 private:
     void sort_entries_by_time();
