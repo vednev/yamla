@@ -64,12 +64,29 @@ void BreakdownView::render_bar_chart(const char* label, const CountMap& data,
     if (ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen)) {
         float chart_h = std::min(180.0f, 24.0f * static_cast<float>(N) + 30.0f);
 
+        // Give ImPlot enough left padding for the Y-axis label strings
+        // and enough right padding so the X-axis tick labels don't clip.
+        ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(8, 4));
+
         if (ImPlot::BeginPlot("##bc", ImVec2(-1, chart_h),
                                ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText))
         {
+            // X axis: auto-fit with a 10% right margin so the largest count
+            // label has room; no tick marks (saves horizontal space).
             ImPlot::SetupAxes(nullptr, nullptr,
-                              ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_NoLabel,
-                              ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_NoLabel);
+                              ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_NoLabel |
+                              ImPlotAxisFlags_NoTickMarks,
+                              ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_NoLabel |
+                              ImPlotAxisFlags_NoTickMarks);
+
+            // Compute the max value and add 15% right padding so the
+            // rightmost tick label has room and doesn't clip against the edge
+            double max_val = 0;
+            for (size_t i = 0; i < N; ++i)
+                if (values[i] > max_val) max_val = values[i];
+            if (max_val > 0)
+                ImPlot::SetupAxisLimits(ImAxis_X1, 0, max_val * 1.15, ImGuiCond_Always);
+
             ImPlot::SetupAxisTicks(ImAxis_Y1, 0, static_cast<double>(N) - 1,
                                    static_cast<int>(N), names);
 
@@ -107,6 +124,7 @@ void BreakdownView::render_bar_chart(const char* label, const CountMap& data,
 
             ImPlot::EndPlot();
         }
+        ImPlot::PopStyleVar(); // PlotPadding
     }
     ImGui::PopID();
 }
