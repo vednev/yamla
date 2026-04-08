@@ -51,8 +51,14 @@ std::string Cluster::infer_hostname(const MmapFile& file,
                 if (parser.parse(ps).get(doc) == simdjson::SUCCESS) {
                     std::string_view host;
                     if (doc["host"].get_string().get(host) == simdjson::SUCCESS
-                        && !host.empty())
+                        && !host.empty()
+                        && host != "mongod"
+                        && host != "mongos"
+                        && host != "mongo")
                     {
+                        // Prefer values that look like real hostnames —
+                        // contain a '.' (FQDN) or ':' (host:port)
+                        // rather than bare process names.
                         return std::string(host);
                     }
                 }

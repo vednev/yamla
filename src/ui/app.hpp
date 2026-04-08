@@ -84,8 +84,10 @@ private:
     bool      running_           = true;
     LoadState last_cluster_state_ = LoadState::Idle;
 
-    // Width of the right (detail) panel — user-draggable splitter
-    float right_w_ = 420.0f;
+    // Panel dimensions — all user-draggable
+    float right_w_      = 420.0f;  // right (detail) panel width
+    float left_w_       = 280.0f;  // left column width
+    float filter_split_ = 0.40f;   // filter panel fraction of left column height
 
     // Load statistics displayed in the menu bar
     size_t total_file_bytes_ = 0;

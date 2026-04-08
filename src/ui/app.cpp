@@ -410,20 +410,38 @@ void App::render_dockspace() {
 
     // Three-column layout: Breakdowns | Log View | Detail View
     ImVec2 avail = ImGui::GetContentRegionAvail();
-    float left_w = 280.0f;
-    float h      = avail.y;
+    float h           = avail.y;
+    float vsplitter_w = 6.0f; // vertical (left-column-width) splitter
 
-    // Left column: breakdowns (top 60%) + filter panel (bottom 40%)
-    ImGui::BeginChild("##left_col", ImVec2(left_w, h), false,
+    // ---- Left column (draggable width) -------------------------
+    ImGui::BeginChild("##left_col", ImVec2(left_w_, h), false,
                       ImGuiWindowFlags_NoScrollbar);
     {
         bool has_data = cluster_ && cluster_->state() == LoadState::Ready;
-        float breakdown_h = h * 0.60f;
-        float filter_h    = h - breakdown_h - 4.0f;
+
+        float breakdown_h = h * (1.0f - filter_split_) - vsplitter_w * 0.5f;
+        float filter_h    = h * filter_split_           - vsplitter_w * 0.5f;
+        breakdown_h = std::max(breakdown_h, 60.0f);
+        filter_h    = std::max(filter_h,    60.0f);
 
         ImGui::BeginChild("##breakdowns", ImVec2(-1, breakdown_h), true);
         if (has_data) breakdown_view_.render();
         ImGui::EndChild();
+
+        // Horizontal splitter between breakdowns and filter panel
+        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0,0,0,0));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1,1,1,0.20f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(1,1,1,0.40f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0,0));
+        ImGui::Button("##vsplit", ImVec2(-1, vsplitter_w));
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor(3);
+        if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+        if (ImGui::IsItemActive()) {
+            float delta = ImGui::GetIO().MouseDelta.y;
+            filter_split_ -= delta / h;
+            filter_split_  = std::max(0.10f, std::min(0.80f, filter_split_));
+        }
 
         ImGui::BeginChild("##filterpanel", ImVec2(-1, filter_h), true);
         if (has_data) filter_view_.render_inner();
@@ -432,11 +450,28 @@ void App::render_dockspace() {
     }
     ImGui::EndChild();
 
-    ImGui::SameLine(0, 4);
+    // Splitter between left column and log view (controls left_w_)
+    ImGui::SameLine(0, 0);
+    ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0,0,0,0));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1,1,1,0.20f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(1,1,1,0.40f));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0,0));
+    ImGui::Button("##leftsplit", ImVec2(vsplitter_w, h));
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor(3);
+    if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+    if (ImGui::IsItemActive()) {
+        float delta = ImGui::GetIO().MouseDelta.x;
+        left_w_ += delta;
+        left_w_  = std::max(180.0f, std::min(avail.x * 0.45f, left_w_));
+    }
 
-    // Centre: log view — takes all space left after the right panel
-    float splitter_w = 6.0f;
-    float center_w_actual = avail.x - left_w - right_w_ - splitter_w - 8.0f;
+    ImGui::SameLine(0, 0);
+
+    // Centre: log view — takes all remaining space
+    float splitter_w = 6.0f; // right splitter width
+    // left_w_ + left-vsplitter + center + right-vsplitter + right_w_
+    float center_w_actual = avail.x - left_w_ - vsplitter_w - right_w_ - splitter_w - 2.0f;
     center_w_actual = std::max(center_w_actual, 120.0f);
 
     ImGui::BeginChild("##logview", ImVec2(center_w_actual, h), true);
@@ -462,7 +497,7 @@ void App::render_dockspace() {
         float delta = ImGui::GetIO().MouseDelta.x;
         right_w_ -= delta; // dragging right → delta > 0 → shrink right panel
         float min_w = 180.0f;
-        float max_w = avail.x - left_w - splitter_w - 120.0f;
+        float max_w = avail.x - left_w_ - vsplitter_w - splitter_w - 120.0f;
         right_w_ = std::max(min_w, std::min(max_w, right_w_));
     }
 
