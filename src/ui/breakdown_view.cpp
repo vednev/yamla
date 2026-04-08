@@ -133,33 +133,46 @@ void BreakdownView::render_table(const char* label, const CountMap& data,
             // For filtering we match by label lookup through StringTable.
             for (size_t i = 0; i < data.size() && i < 50; ++i) {
                 ImGui::TableNextRow();
+                ImGui::PushID(static_cast<int>(i));
                 ImGui::TableSetColumnIndex(0);
 
-                // Resolve index from label for filter comparison
-                // (strings_ intern lookup is O(1) via unordered_map)
                 uint32_t row_idx = strings_
                     ? const_cast<StringTable*>(strings_)->intern(data[i].label)
                     : 0;
                 bool selected = (current == row_idx && row_idx != 0);
 
-                char sel_label[256];
-                std::snprintf(sel_label, sizeof(sel_label), "%.*s",
-                              static_cast<int>(data[i].label.size()),
-                              data[i].label.c_str());
-
-                if (ImGui::Selectable(sel_label, selected,
-                                       ImGuiSelectableFlags_SpanAllColumns))
-                {
-                    if (filter_) {
-                        filter_->*field = selected ? 0 : row_idx;
-                        if (on_filter_changed_) on_filter_changed_();
-                    }
+                // Invert on selection: white background set via TableBgColor
+                if (selected) {
+                    ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,
+                        IM_COL32(255, 255, 255, 255));
                 }
+
+                // Invisible spanning selectable for click detection
+                bool clicked = ImGui::Selectable("##sel", selected,
+                                                 ImGuiSelectableFlags_SpanAllColumns);
+                bool hot = selected || ImGui::IsItemHovered();
+
+                // Text colour: black on hot rows, white otherwise
+                ImVec4 txt = hot ? ImVec4(0,0,0,1) : ImVec4(1,1,1,1);
+
+                ImGui::SameLine();
+                ImGui::PushStyleColor(ImGuiCol_Text, txt);
+                ImGui::TextUnformatted(data[i].label.c_str());
+                ImGui::PopStyleColor();
+
+                if (clicked && filter_) {
+                    filter_->*field = selected ? 0 : row_idx;
+                    if (on_filter_changed_) on_filter_changed_();
+                }
+
                 ImGui::TableSetColumnIndex(1);
+                ImGui::PushStyleColor(ImGuiCol_Text, txt);
                 {
                     char cbuf[27];
                     ImGui::TextUnformatted(fmt_count_buf(data[i].count, cbuf, sizeof(cbuf)));
                 }
+                ImGui::PopStyleColor();
+                ImGui::PopID();
             }
             ImGui::EndTable();
         }

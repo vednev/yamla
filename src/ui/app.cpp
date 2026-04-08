@@ -97,18 +97,137 @@ bool App::init() {
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
-    // Dark theme with custom accent
-    ImGui::StyleColorsDark();
+    // ----------------------------------------------------------------
+    //  CLI / terminal theme
+    //  Black background, white text, white borders.
+    //  Hover = inverted (white fill, black text).
+    //  Zero rounding everywhere — sharp, crisp, old-school.
+    // ----------------------------------------------------------------
+    ImGui::StyleColorsDark();   // base reset
     ImGuiStyle& style = ImGui::GetStyle();
-    style.WindowRounding    = 4.0f;
-    style.FrameRounding     = 3.0f;
-    style.GrabRounding      = 3.0f;
-    style.ScrollbarRounding = 3.0f;
-    style.TabRounding       = 3.0f;
-    style.Colors[ImGuiCol_WindowBg]       = ImVec4(0.10f, 0.10f, 0.12f, 1.00f);
-    style.Colors[ImGuiCol_Header]         = ImVec4(0.20f, 0.35f, 0.55f, 0.80f);
-    style.Colors[ImGuiCol_HeaderHovered]  = ImVec4(0.25f, 0.45f, 0.65f, 0.90f);
-    style.Colors[ImGuiCol_HeaderActive]   = ImVec4(0.30f, 0.55f, 0.75f, 1.00f);
+
+    // --- Geometry ---------------------------------------------------
+    style.WindowRounding    = 0.0f;
+    style.ChildRounding     = 0.0f;
+    style.FrameRounding     = 0.0f;
+    style.GrabRounding      = 0.0f;
+    style.PopupRounding     = 0.0f;
+    style.ScrollbarRounding = 0.0f;
+    style.TabRounding       = 0.0f;
+
+    // Border thickness: 1px crisp line on every frame/window
+    style.WindowBorderSize  = 1.0f;
+    style.ChildBorderSize   = 1.0f;
+    style.FrameBorderSize   = 1.0f;   // buttons, inputs, combos get a border
+    style.PopupBorderSize   = 1.0f;
+    style.TabBorderSize     = 1.0f;
+
+    // Slightly more padding so content doesn't feel cramped against the border
+    style.FramePadding      = ImVec2(6, 4);
+    style.WindowPadding     = ImVec2(6, 6);
+    style.ItemSpacing       = ImVec2(8, 4);
+
+    // --- Palette convenience ----------------------------------------
+    const ImVec4 black      = ImVec4(0.00f, 0.00f, 0.00f, 1.00f);
+    const ImVec4 white      = ImVec4(1.00f, 1.00f, 1.00f, 1.00f);
+    const ImVec4 dim        = ImVec4(0.50f, 0.50f, 0.50f, 1.00f);  // disabled/inactive
+    const ImVec4 dark_gray  = ImVec4(0.10f, 0.10f, 0.10f, 1.00f);  // child backgrounds
+    const ImVec4 mid_gray   = ImVec4(0.20f, 0.20f, 0.20f, 1.00f);  // active/pressed state
+    const ImVec4 clear      = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+
+    // --- Backgrounds ------------------------------------------------
+    style.Colors[ImGuiCol_WindowBg]          = black;
+    style.Colors[ImGuiCol_ChildBg]           = dark_gray;
+    style.Colors[ImGuiCol_PopupBg]           = black;
+    style.Colors[ImGuiCol_MenuBarBg]         = black;
+
+    // --- Borders ----------------------------------------------------
+    style.Colors[ImGuiCol_Border]            = white;
+    style.Colors[ImGuiCol_BorderShadow]      = clear;
+
+    // --- Text -------------------------------------------------------
+    style.Colors[ImGuiCol_Text]              = white;
+    style.Colors[ImGuiCol_TextDisabled]      = dim;
+    style.Colors[ImGuiCol_TextSelectedBg]    = ImVec4(1.0f, 1.0f, 1.0f, 0.25f);
+
+    // --- Frames (inputs, combos, sliders) ---------------------------
+    style.Colors[ImGuiCol_FrameBg]           = black;
+    style.Colors[ImGuiCol_FrameBgHovered]    = ImVec4(0.15f, 0.15f, 0.15f, 1.00f);
+    style.Colors[ImGuiCol_FrameBgActive]     = mid_gray;
+
+    // --- Buttons ----------------------------------------------------
+    // Bright-but-not-pure-white so white text label stays readable.
+    style.Colors[ImGuiCol_Button]            = black;
+    style.Colors[ImGuiCol_ButtonHovered]     = ImVec4(0.22f, 0.22f, 0.22f, 1.00f);
+    style.Colors[ImGuiCol_ButtonActive]      = mid_gray;
+
+    // --- Headers (collapsing headers, table headers, selectables) ---
+    // CollapsingHeader uses Text colour for its label — can't be inverted
+    // per-state without reimplementing the widget, so use a bright but
+    // slightly-off-white hover so white text stays readable over it.
+    style.Colors[ImGuiCol_Header]            = black;
+    style.Colors[ImGuiCol_HeaderHovered]     = ImVec4(0.22f, 0.22f, 0.22f, 1.00f);
+    style.Colors[ImGuiCol_HeaderActive]      = mid_gray;
+
+    // --- Tabs -------------------------------------------------------
+    style.Colors[ImGuiCol_Tab]               = black;
+    style.Colors[ImGuiCol_TabHovered]        = white;
+    style.Colors[ImGuiCol_TabActive]         = mid_gray;
+    style.Colors[ImGuiCol_TabUnfocused]      = black;
+    style.Colors[ImGuiCol_TabUnfocusedActive]= mid_gray;
+
+    // --- Title bar --------------------------------------------------
+    style.Colors[ImGuiCol_TitleBg]           = black;
+    style.Colors[ImGuiCol_TitleBgActive]     = black;
+    style.Colors[ImGuiCol_TitleBgCollapsed]  = black;
+
+    // --- Scrollbar --------------------------------------------------
+    style.Colors[ImGuiCol_ScrollbarBg]       = black;
+    style.Colors[ImGuiCol_ScrollbarGrab]     = dim;
+    style.Colors[ImGuiCol_ScrollbarGrabHovered] = white;
+    style.Colors[ImGuiCol_ScrollbarGrabActive]  = white;
+
+    // --- Sliders / grabs --------------------------------------------
+    style.Colors[ImGuiCol_SliderGrab]        = white;
+    style.Colors[ImGuiCol_SliderGrabActive]  = white;
+
+    // --- Check mark, radio ------------------------------------------
+    style.Colors[ImGuiCol_CheckMark]         = white;
+
+    // --- Resize grip ------------------------------------------------
+    style.Colors[ImGuiCol_ResizeGrip]        = clear;
+    style.Colors[ImGuiCol_ResizeGripHovered] = white;
+    style.Colors[ImGuiCol_ResizeGripActive]  = white;
+
+    // --- Separators -------------------------------------------------
+    style.Colors[ImGuiCol_Separator]         = white;
+    style.Colors[ImGuiCol_SeparatorHovered]  = white;
+    style.Colors[ImGuiCol_SeparatorActive]   = white;
+
+    // --- Table ------------------------------------------------------
+    style.Colors[ImGuiCol_TableHeaderBg]        = black;
+    style.Colors[ImGuiCol_TableBorderStrong]     = white;
+    style.Colors[ImGuiCol_TableBorderLight]      = dim;
+    style.Colors[ImGuiCol_TableRowBg]            = black;
+    style.Colors[ImGuiCol_TableRowBgAlt]         = dark_gray;
+
+    // --- Nav highlight (keyboard focus) ----------------------------
+    style.Colors[ImGuiCol_NavHighlight]      = white;
+
+    // --- Plot colours (ImPlot picks these up via the ImGui palette) -
+    // ImPlot has its own palette but we set the plot background here
+    style.Colors[ImGuiCol_PlotLines]         = white;
+    style.Colors[ImGuiCol_PlotLinesHovered]  = white;
+    style.Colors[ImGuiCol_PlotHistogram]     = white;
+    style.Colors[ImGuiCol_PlotHistogramHovered] = white;
+
+    // ImGui pushes ImGuiCol_Text as the "active" text colour when a
+    // button/header is hovered (white fill). We need to override text
+    // to black on those inverted elements at render time — see below.
+    // We store the inverted text colour in a custom variable so
+    // render sites can push it around hovered selectables.
+    // (ImGui has no per-state text colour override, so we use a push
+    //  in the few places that need it — table rows, collapsing headers.)
 
     ImGui_ImplSDL2_InitForOpenGL(window_, gl_ctx_);
     ImGui_ImplOpenGL3_Init("#version 330 core");
@@ -268,9 +387,7 @@ void App::render_dockspace() {
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(4, 4));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.08f, 0.08f, 0.10f, 1.0f));
     ImGui::Begin("##host", nullptr, host_flags);
-    ImGui::PopStyleColor();
     ImGui::PopStyleVar(2);
 
     // Three-column layout: Breakdowns | Log View | Detail View
@@ -279,27 +396,18 @@ void App::render_dockspace() {
     float h      = avail.y;
 
     // Left column: breakdowns (top 60%) + filter panel (bottom 40%)
-    // Both stacked inside a borderless outer container so they share left_w.
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.10f, 0.13f, 1.0f));
     ImGui::BeginChild("##left_col", ImVec2(left_w, h), false,
                       ImGuiWindowFlags_NoScrollbar);
-    ImGui::PopStyleColor();
     {
         bool has_data = cluster_ && cluster_->state() == LoadState::Ready;
         float breakdown_h = h * 0.60f;
-        float filter_h    = h - breakdown_h - 4.0f; // 4px gap
+        float filter_h    = h - breakdown_h - 4.0f;
 
-        // Breakdowns
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.10f, 0.13f, 1.0f));
         ImGui::BeginChild("##breakdowns", ImVec2(-1, breakdown_h), true);
-        ImGui::PopStyleColor();
         if (has_data) breakdown_view_.render();
         ImGui::EndChild();
 
-        // Filter panel pinned below breakdowns
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.10f, 0.13f, 1.0f));
         ImGui::BeginChild("##filterpanel", ImVec2(-1, filter_h), true);
-        ImGui::PopStyleColor();
         if (has_data) filter_view_.render_inner();
         else          ImGui::TextDisabled("Load a cluster to see filters.");
         ImGui::EndChild();
@@ -320,10 +428,10 @@ void App::render_dockspace() {
     ImGui::SameLine(0, 0);
 
     // ---- Splitter between log view and detail panel ----
-    // An invisible, drag-sensitive button that sits between the two panels.
+    // Transparent normally; bright white when dragging so the user can see it.
     ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0, 0, 0, 0));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.4f, 0.6f, 0.9f, 0.35f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.4f, 0.6f, 0.9f, 0.55f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1, 1, 1, 0.20f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(1, 1, 1, 0.40f));
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
     ImGui::Button("##splitter", ImVec2(splitter_w, h));
     ImGui::PopStyleVar();
@@ -343,9 +451,7 @@ void App::render_dockspace() {
     ImGui::SameLine(0, 0);
 
     // Right: detail view (resizable)
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.10f, 0.13f, 1.0f));
     ImGui::BeginChild("##detail", ImVec2(right_w_, h), true);
-    ImGui::PopStyleColor();
     detail_view_.render_inner();
     ImGui::EndChild();
 
@@ -388,7 +494,7 @@ void App::render_frame() {
 int App::run() {
     if (!init()) return 1;
 
-    ImVec4 clear_color(0.08f, 0.08f, 0.10f, 1.00f);
+    ImVec4 clear_color(0.00f, 0.00f, 0.00f, 1.00f);
 
     while (running_) {
         SDL_Event event;
