@@ -183,14 +183,6 @@ void App::render_menu_bar() {
             if (ImGui::MenuItem("Quit", "Alt+F4")) running_ = false;
             ImGui::EndMenu();
         }
-        if (ImGui::BeginMenu("View")) {
-            bool fv_open = filter_view_.is_open();
-            if (ImGui::MenuItem("Filters", nullptr, &fv_open)) {
-                if (fv_open) filter_view_.show();
-                else         filter_view_.hide();
-            }
-            ImGui::EndMenu();
-        }
         if (ImGui::BeginMenu("Help")) {
             ImGui::MenuItem("Drop one or more MongoDB log files onto this window");
             ImGui::EndMenu();
@@ -268,12 +260,32 @@ void App::render_dockspace() {
     float center_w = avail.x - left_w - right_w - 12.0f; // 3 × 4px padding
     float h        = avail.y;
 
-    // Left: breakdowns
+    // Left column: breakdowns (top 60%) + filter panel (bottom 40%)
+    // Both stacked inside a borderless outer container so they share left_w.
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.10f, 0.13f, 1.0f));
-    ImGui::BeginChild("##breakdowns", ImVec2(left_w, h), true);
+    ImGui::BeginChild("##left_col", ImVec2(left_w, h), false,
+                      ImGuiWindowFlags_NoScrollbar);
     ImGui::PopStyleColor();
-    if (cluster_ && cluster_->state() == LoadState::Ready)
-        breakdown_view_.render();
+    {
+        bool has_data = cluster_ && cluster_->state() == LoadState::Ready;
+        float breakdown_h = h * 0.60f;
+        float filter_h    = h - breakdown_h - 4.0f; // 4px gap
+
+        // Breakdowns
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.10f, 0.13f, 1.0f));
+        ImGui::BeginChild("##breakdowns", ImVec2(-1, breakdown_h), true);
+        ImGui::PopStyleColor();
+        if (has_data) breakdown_view_.render();
+        ImGui::EndChild();
+
+        // Filter panel pinned below breakdowns
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.10f, 0.13f, 1.0f));
+        ImGui::BeginChild("##filterpanel", ImVec2(-1, filter_h), true);
+        ImGui::PopStyleColor();
+        if (has_data) filter_view_.render_inner();
+        else          ImGui::TextDisabled("Load a cluster to see filters.");
+        ImGui::EndChild();
+    }
     ImGui::EndChild();
 
     ImGui::SameLine(0, 4);
@@ -321,8 +333,7 @@ void App::render_frame() {
     }
 
     render_menu_bar();
-    render_dockspace();     // three-column host
-    filter_view_.render();  // floating filter window (no-op when closed)
+    render_dockspace();     // three-column host with filter panel pinned in left column
 }
 
 // ------------------------------------------------------------

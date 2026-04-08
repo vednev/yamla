@@ -7,16 +7,19 @@
 // ------------------------------------------------------------
 //  FilterView
 //
-//  A floating ImGui window with two checkbox lists:
+//  Renders two checkbox lists embedded inside the left panel:
 //    1. Connection IDs  — unique conn IDs from the loaded cluster
 //    2. Driver types    — unique driver name+version strings
 //
-//  Each list defaults to all items checked ("show all").
-//  Un-checking an item adds its value to the exclusion set in
-//  FilterState, which log_view::entry_matches tests each frame.
+//  Inclusion model:
+//    - Empty include set  → filter inactive, all entries shown.
+//    - Non-empty set      → show only entries whose value is in
+//                           the set.
 //
-//  The window is shown/hidden via show()/hide(). The App
-//  exposes a menu item to toggle it.
+//  Default on load: all checkboxes unchecked (empty sets).
+//  Checking any box narrows the log view to only those items.
+//  "All" button fills the set (selects everything).
+//  "None" button empties the set (deselects everything = show all).
 // ------------------------------------------------------------
 class FilterView {
 public:
@@ -29,19 +32,13 @@ public:
     void set_filter(FilterState* filter);
     void set_on_filter_changed(FilterChangedCb cb);
 
-    void show() { open_ = true; }
-    void hide() { open_ = false; }
-    bool is_open() const { return open_; }
-
-    // Call once per frame from App::render_frame().
-    // Renders the floating window when open_.
-    void render();
+    // Render the contents directly — call inside an existing child window.
+    void render_inner();
 
 private:
     void render_conn_section();
     void render_driver_section();
 
-    // "Select All" / "Clear All" helpers
     void select_all_conn();
     void clear_all_conn();
     void select_all_driver();
@@ -51,9 +48,7 @@ private:
     const StringTable*    strings_  = nullptr;
     FilterState*          filter_   = nullptr;
     FilterChangedCb       on_filter_changed_;
-    bool                  open_     = false;
 
-    // Local search buffers for filtering long lists
     char conn_search_[128]   = {};
     char driver_search_[128] = {};
 };

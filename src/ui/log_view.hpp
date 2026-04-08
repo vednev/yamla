@@ -31,24 +31,23 @@ struct FilterState {
     uint32_t ns_idx            = 0;
     uint32_t shape_idx         = 0;
 
-    // Set-based filters from the Filter window.
-    // Empty set = "show all". Non-empty = show only entries whose
-    // value is IN the set (i.e. user has left those boxes checked).
-    // We store the EXCLUDED values so the default (nothing excluded)
-    // is represented by an empty set, which is cheaper to check.
-    std::unordered_set<uint32_t> conn_id_exclude;     // raw conn_id values
-    std::unordered_set<uint32_t> driver_idx_exclude;  // StringTable indices
+    // Set-based inclusion filters from the Filter panel.
+    // Empty set = no filter active (show all).
+    // Non-empty = show only entries whose value is IN the set.
+    // Checking a box adds its ID; unchecking removes it.
+    std::unordered_set<uint32_t> conn_id_include;     // raw conn_id values
+    std::unordered_set<uint32_t> driver_idx_include;  // StringTable indices
 
     bool active() const {
-        return !text_search.empty()        ||
-               severity_filter != 0       ||
-               component_idx   != 0       ||
-               op_type_idx     != 0       ||
-               driver_idx      != 0       ||
-               ns_idx          != 0       ||
-               shape_idx       != 0       ||
-               !conn_id_exclude.empty()   ||
-               !driver_idx_exclude.empty();
+        return !text_search.empty()         ||
+               severity_filter != 0        ||
+               component_idx   != 0        ||
+               op_type_idx     != 0        ||
+               driver_idx      != 0        ||
+               ns_idx          != 0        ||
+               shape_idx       != 0        ||
+               !conn_id_include.empty()    ||
+               !driver_idx_include.empty();
     }
 
     void clear() { *this = FilterState{}; }
