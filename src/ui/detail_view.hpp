@@ -37,10 +37,15 @@ public:
     bool has_entry() const { return entry_ != nullptr; }
 
 private:
-    // Recursive JSON tree renderer implemented in detail_view.cpp
-    static void render_json_tree(const char* json, size_t len);
+    void render_toolbar();
+
+    // Render one key/value leaf — respects wrap_ flag.
+    void render_leaf(const char* key, const char* color_tag,
+                     const char* value_str) const;
 
     const LogEntry*    entry_     = nullptr;
     const char*        file_data_ = nullptr;
     const StringTable* strings_   = nullptr;
+
+    bool wrap_ = false;  // text-wrap toggle controlled by toolbar checkbox
 };

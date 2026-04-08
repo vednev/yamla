@@ -275,10 +275,8 @@ void App::render_dockspace() {
 
     // Three-column layout: Breakdowns | Log View | Detail View
     ImVec2 avail = ImGui::GetContentRegionAvail();
-    float left_w   = 280.0f;
-    float right_w  = 420.0f;
-    float center_w = avail.x - left_w - right_w - 12.0f; // 3 × 4px padding
-    float h        = avail.y;
+    float left_w = 280.0f;
+    float h      = avail.y;
 
     // Left column: breakdowns (top 60%) + filter panel (bottom 40%)
     // Both stacked inside a borderless outer container so they share left_w.
@@ -310,16 +308,43 @@ void App::render_dockspace() {
 
     ImGui::SameLine(0, 4);
 
-    // Centre: log view
-    ImGui::BeginChild("##logview", ImVec2(center_w, h), true);
+    // Centre: log view — takes all space left after the right panel
+    float splitter_w = 6.0f;
+    float center_w_actual = avail.x - left_w - right_w_ - splitter_w - 8.0f;
+    center_w_actual = std::max(center_w_actual, 120.0f);
+
+    ImGui::BeginChild("##logview", ImVec2(center_w_actual, h), true);
     log_view_.render_inner();
     ImGui::EndChild();
 
-    ImGui::SameLine(0, 4);
+    ImGui::SameLine(0, 0);
 
-    // Right: detail view
+    // ---- Splitter between log view and detail panel ----
+    // An invisible, drag-sensitive button that sits between the two panels.
+    ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.4f, 0.6f, 0.9f, 0.35f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.4f, 0.6f, 0.9f, 0.55f));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
+    ImGui::Button("##splitter", ImVec2(splitter_w, h));
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor(3);
+
+    if (ImGui::IsItemHovered())
+        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+
+    if (ImGui::IsItemActive()) {
+        float delta = ImGui::GetIO().MouseDelta.x;
+        right_w_ -= delta; // dragging right → delta > 0 → shrink right panel
+        float min_w = 180.0f;
+        float max_w = avail.x - left_w - splitter_w - 120.0f;
+        right_w_ = std::max(min_w, std::min(max_w, right_w_));
+    }
+
+    ImGui::SameLine(0, 0);
+
+    // Right: detail view (resizable)
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.10f, 0.13f, 1.0f));
-    ImGui::BeginChild("##detail", ImVec2(right_w, h), true);
+    ImGui::BeginChild("##detail", ImVec2(right_w_, h), true);
     ImGui::PopStyleColor();
     detail_view_.render_inner();
     ImGui::EndChild();

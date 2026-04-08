@@ -82,6 +82,9 @@ private:
 
     bool running_ = true;
 
+    // Width of the right (detail) panel — user-draggable splitter
+    float right_w_ = 420.0f;
+
     // Load statistics displayed in the menu bar
     size_t total_file_bytes_ = 0;
     double load_duration_s_  = 0.0;
