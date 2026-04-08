@@ -3,6 +3,10 @@
 Yet Another MongoDB Log Analyzer. Fast, terminal-aesthetic desktop GUI for
 inspecting and filtering MongoDB 4.4+ structured JSON logs.
 
+> **Supported log type:** `mongod` server logs only.
+> YAMLA does not currently support MongoDB Agent logs, Ops Manager logs,
+> `mongos` router logs, or FTDC diagnostic data files.
+
 ## Dependencies
 
 | Tool | Notes |
