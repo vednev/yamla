@@ -64,15 +64,18 @@ void BreakdownView::render_bar_chart(const char* label, const CountMap& data,
             uint32_t current = filter_ ? (filter_->*field) : 0;
 
             for (size_t i = 0; i < N; ++i) {
-                uint32_t bar_val = is_severity
-                    ? static_cast<uint32_t>(i) + 1
-                    : 0;
+                // Resolve the filter value this bar represents using the same
+                // method as the click handler — enum value + 1, not list position.
+                uint32_t bar_val = 0;
+                if (is_severity)
+                    bar_val = static_cast<uint32_t>(
+                        severity_from_string(data[i].label.c_str())) + 1;
 
-                bool active = filter_ && is_severity && (current == bar_val);
+                bool active = is_severity && current != 0 && (current == bar_val);
 
                 ImPlot::PushStyleColor(ImPlotCol_Fill,
-                    active ? ImVec4(1.0f, 0.7f, 0.2f, 1.0f)
-                           : ImVec4(0.3f, 0.6f, 0.9f, 0.85f));
+                    active ? ImVec4(1.0f, 0.65f, 0.1f, 1.0f)   // amber — selected
+                           : ImVec4(0.3f, 0.6f,  0.9f, 0.85f)); // default blue
 
                 double y = static_cast<double>(i);
                 // values[i] is the bar length (count); y is its position on Y axis
