@@ -46,6 +46,7 @@ private:
     void render_frame();
     void render_menu_bar();
     void render_dockspace();
+    void render_loading_popup();
 
     // Drag-and-drop handler: receives a list of file paths
     void handle_drop(const std::vector<std::string>& paths);

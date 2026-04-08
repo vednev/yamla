@@ -327,17 +327,13 @@ void App::render_menu_bar() {
             ImGui::EndMenu();
         }
 
-        // Show load status in menu bar
+        // Show load status in menu bar (stats persist after load; popup handles progress)
         if (cluster_) {
             ImGui::SetCursorPosX(ImGui::GetIO().DisplaySize.x - 460.0f);
             switch (cluster_->state()) {
-                case LoadState::Loading: {
-                    float p = cluster_->progress();
-                    char buf[64];
-                    std::snprintf(buf, sizeof(buf), "Loading... %.0f%%", p * 100.0f);
-                    ImGui::ProgressBar(p, ImVec2(200, 14), buf);
+                case LoadState::Loading:
+                    ImGui::TextDisabled("Loading\xe2\x80\xa6");
                     break;
-                }
                 case LoadState::Ready: {
                     size_t n = cluster_->entries().size();
                     // Format file size as MB or GB
@@ -459,6 +455,53 @@ void App::render_dockspace() {
 }
 
 // ------------------------------------------------------------
+//  render_loading_popup
+// ------------------------------------------------------------
+void App::render_loading_popup() {
+    if (!cluster_ || cluster_->state() != LoadState::Loading) return;
+
+    float progress = cluster_->progress();
+
+    // Centre a fixed-size popup on screen
+    ImGuiIO& io   = ImGui::GetIO();
+    float pw = 420.0f, ph = 90.0f;
+    ImGui::SetNextWindowPos(
+        ImVec2((io.DisplaySize.x - pw) * 0.5f,
+               (io.DisplaySize.y - ph) * 0.5f),
+        ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(pw, ph), ImGuiCond_Always);
+
+    ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoTitleBar    | ImGuiWindowFlags_NoResize    |
+        ImGuiWindowFlags_NoMove        | ImGuiWindowFlags_NoScrollbar |
+        ImGuiWindowFlags_NoSavedSettings;
+
+    ImGui::Begin("##loading_popup", nullptr, flags);
+
+    // Label
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 8.0f);
+    ImGui::SetCursorPosX((pw - ImGui::CalcTextSize("Loading\xe2\x80\xa6").x) * 0.5f);
+    ImGui::TextUnformatted("Loading\xe2\x80\xa6");
+
+    ImGui::Spacing();
+
+    // Yellow progress bar — override colours for this one widget
+    ImGui::PushStyleColor(ImGuiCol_PlotHistogram,       ImVec4(1.0f, 0.95f, 0.0f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_FrameBg,             ImVec4(0.15f, 0.15f, 0.0f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_Text,                ImVec4(0.0f, 0.0f, 0.0f, 1.0f));
+
+    char pct[16];
+    std::snprintf(pct, sizeof(pct), "%.0f%%", progress * 100.0f);
+    ImGui::SetNextItemWidth(pw - 24.0f);
+    ImGui::SetCursorPosX(12.0f);
+    ImGui::ProgressBar(progress, ImVec2(pw - 24.0f, 22.0f), pct);
+
+    ImGui::PopStyleColor(3);
+
+    ImGui::End();
+}
+
+// ------------------------------------------------------------
 //  render_frame
 // ------------------------------------------------------------
 void App::render_frame() {
@@ -484,8 +527,9 @@ void App::render_frame() {
     }
 
     render_menu_bar();
-    render_dockspace();     // three-column host with filter panel pinned in left column
-    prefs_view_.render();   // floating preferences window (no-op when closed)
+    render_dockspace();       // three-column host with filter panel pinned in left column
+    render_loading_popup();   // centered yellow progress popup while loading
+    prefs_view_.render();     // floating preferences window (no-op when closed)
 }
 
 // ------------------------------------------------------------
