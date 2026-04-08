@@ -25,28 +25,32 @@ struct FilterState {
 
     // Single-value category filters (0 = no filter)
     uint32_t severity_filter   = 0;  // (Severity enum value + 1), 0 = all
-    uint32_t component_idx     = 0;
     uint32_t op_type_idx       = 0;
     uint32_t driver_idx        = 0;  // single driver from breakdown panel
     uint32_t ns_idx            = 0;
     uint32_t shape_idx         = 0;
 
+    // Multi-select component filter — empty = no filter (show all)
+    std::unordered_set<uint32_t> component_idx_include;
+
+    // Slow query filter — when true only entries with duration_ms > 100 pass
+    bool slow_query_only = false;
+
     // Set-based inclusion filters from the Filter panel.
     // Empty set = no filter active (show all).
-    // Non-empty = show only entries whose value is IN the set.
-    // Checking a box adds its ID; unchecking removes it.
     std::unordered_set<uint32_t> conn_id_include;     // raw conn_id values
     std::unordered_set<uint32_t> driver_idx_include;  // StringTable indices
 
     bool active() const {
-        return !text_search.empty()         ||
-               severity_filter != 0        ||
-               component_idx   != 0        ||
-               op_type_idx     != 0        ||
-               driver_idx      != 0        ||
-               ns_idx          != 0        ||
-               shape_idx       != 0        ||
-               !conn_id_include.empty()    ||
+        return !text_search.empty()              ||
+               severity_filter != 0             ||
+               !component_idx_include.empty()   ||
+               op_type_idx     != 0             ||
+               driver_idx      != 0             ||
+               ns_idx          != 0             ||
+               shape_idx       != 0             ||
+               slow_query_only                  ||
+               !conn_id_include.empty()         ||
                !driver_idx_include.empty();
     }
 

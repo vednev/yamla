@@ -47,5 +47,5 @@ private:
     const char*        file_data_ = nullptr;
     const StringTable* strings_   = nullptr;
 
-    bool wrap_ = false;  // text-wrap toggle controlled by toolbar checkbox
+    bool wrap_ = true;   // text-wrap toggle controlled by toolbar checkbox (on by default)
 };

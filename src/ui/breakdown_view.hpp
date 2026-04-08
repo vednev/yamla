@@ -31,6 +31,11 @@ private:
                           uint32_t FilterState::*field, bool is_severity = false);
     void render_table(const char* label, const CountMap& data,
                       uint32_t FilterState::*field);
+    // Multi-select table: clicking toggles membership in an unordered_set field
+    void render_table_multi(const char* label, const CountMap& data,
+                            std::unordered_set<uint32_t> FilterState::*set_field);
+
+    void render_reset_button();
 
     const AnalysisResult* analysis_ = nullptr;
     const StringTable*    strings_  = nullptr;

@@ -57,11 +57,14 @@ bool LogView::entry_matches(const LogEntry& e) const {
         static_cast<uint32_t>(e.severity) != filter_->severity_filter - 1)
         return false;
 
-    if (filter_->component_idx && e.component_idx != filter_->component_idx) return false;
-    if (filter_->op_type_idx   && e.op_type_idx   != filter_->op_type_idx)   return false;
+    if (!filter_->component_idx_include.empty() &&
+        !filter_->component_idx_include.count(e.component_idx)) return false;
+    if (filter_->op_type_idx && e.op_type_idx != filter_->op_type_idx) return false;
     if (filter_->driver_idx    && e.driver_idx     != filter_->driver_idx)    return false;
     if (filter_->ns_idx        && e.ns_idx         != filter_->ns_idx)        return false;
     if (filter_->shape_idx     && e.shape_idx      != filter_->shape_idx)     return false;
+
+    if (filter_->slow_query_only && e.duration_ms <= 100) return false;
 
     // Set-based inclusion filters — non-empty means "show only these values"
     if (!filter_->conn_id_include.empty() &&
