@@ -82,14 +82,13 @@ bool FontManager::load_internal(const Prefs& prefs,
     cfg.OversampleV = 2;
     cfg.PixelSnapH  = false;
 
-    // Include Basic Latin + Latin-1 Supplement + common typographic punctuation
-    // (en-dash, em-dash, ellipsis, smart quotes, etc.) so those glyphs never
-    // render as question marks.
+    // Glyph ranges: each entry is a (first, last) inclusive pair.
+    // The array MUST be terminated with a 0,0 pair — a single 0 is not enough.
     static const ImWchar glyph_ranges[] = {
         0x0020, 0x00FF,  // Basic Latin + Latin-1 Supplement
-        0x2013, 0x2026,  // en-dash, em-dash, ellipsis (…)
-        0x2018, 0x201F,  // smart quotes
-        0,
+        0x2013, 0x2026,  // en-dash, em-dash, horizontal ellipsis
+        0x2018, 0x201F,  // single/double typographic quotes
+        0, 0,            // terminator pair
     };
     cfg.GlyphRanges = glyph_ranges;
 
