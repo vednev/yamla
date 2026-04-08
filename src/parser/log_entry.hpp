@@ -85,6 +85,18 @@ inline const char* severity_string(Severity s) {
     }
 }
 
+// Parse a severity label string back to the enum.
+// Used by the UI to map bar-chart labels back to filter values.
+inline Severity severity_from_string(const char* s) {
+    if (!s) return Severity::Unknown;
+    if (s[0] == 'F') return Severity::Fatal;
+    if (s[0] == 'E') return Severity::Error;
+    if (s[0] == 'W') return Severity::Warning;
+    if (s[0] == 'I') return Severity::Info;
+    if (s[0] == 'D') return Severity::Debug;
+    return Severity::Unknown;
+}
+
 // ------------------------------------------------------------
 //  LogEntry — packed struct stored in ArenaVector
 //

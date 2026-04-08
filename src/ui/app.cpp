@@ -27,7 +27,6 @@ App::App() {
     log_view_.set_on_select([this](size_t idx) {
         if (!cluster_ || cluster_->state() != LoadState::Ready) return;
         const LogEntry& e = cluster_->entries()[idx];
-        // Find the node file for this entry
         if (e.node_idx < node_files_.size() && node_files_[e.node_idx]) {
             detail_view_.set_entry(&e,
                                    node_files_[e.node_idx]->data(),

@@ -84,14 +84,16 @@ void BreakdownView::render_bar_chart(const char* label, const CountMap& data,
             if (ImPlot::IsPlotHovered() && ImGui::IsMouseClicked(0)) {
                 ImPlotPoint mp = ImPlot::GetPlotMousePos();
                 int clicked_i = static_cast<int>(std::round(mp.y));
-                if (clicked_i >= 0 && clicked_i < static_cast<int>(N)) {
-                    if (filter_) {
-                        if (is_severity) {
-                            uint32_t v = static_cast<uint32_t>(clicked_i) + 1;
-                            filter_->*field = (filter_->*field == v) ? 0 : v;
-                        }
-                        if (on_filter_changed_) on_filter_changed_();
+                if (clicked_i >= 0 && clicked_i < static_cast<int>(N) && filter_) {
+                    if (is_severity) {
+                        // Resolve the actual Severity enum value from the label,
+                        // not the sorted position — they differ when sorted by count.
+                        Severity sev = severity_from_string(data[clicked_i].label.c_str());
+                        // Store as (enum_value + 1) so 0 remains "no filter"
+                        uint32_t v = static_cast<uint32_t>(sev) + 1;
+                        filter_->*field = (filter_->*field == v) ? 0 : v;
                     }
+                    if (on_filter_changed_) on_filter_changed_();
                 }
             }
 

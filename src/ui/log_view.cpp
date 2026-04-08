@@ -147,6 +147,7 @@ void LogView::render_inner() {
             const LogEntry& e = entries_[idx];
 
             ImGui::TableNextRow();
+            ImGui::PushID(row); // unique ID scope per row — prevents duplicate-timestamp ID collisions
 
             bool is_selected = (selected_row_ == row);
             if (is_selected) {
@@ -166,7 +167,9 @@ void LogView::render_inner() {
 #else
                 gmtime_r(&sec, &t);
 #endif
-                char ts_buf[32];
+                char ts_buf[64];
+                // Render the timestamp as visible text, use "##" selectable so the
+                // ID is unique (comes from PushID(row) above, not the text label).
                 std::snprintf(ts_buf, sizeof(ts_buf),
                               "%04d-%02d-%02d %02d:%02d:%02d.%03d",
                               t.tm_year+1900, t.tm_mon+1, t.tm_mday,
@@ -174,8 +177,12 @@ void LogView::render_inner() {
 
                 ImGui::PushStyleColor(ImGuiCol_Text,
                     ImGui::ColorConvertU32ToFloat4(severity_color_u32(e.severity)));
-                bool clicked = ImGui::Selectable(ts_buf, is_selected,
-                                                 ImGuiSelectableFlags_SpanAllColumns);
+                // Selectable spans all columns; label is empty so ImGui ID = PushID scope
+                bool clicked = ImGui::Selectable("##row", is_selected,
+                                                 ImGuiSelectableFlags_SpanAllColumns,
+                                                 ImVec2(0, 0));
+                ImGui::SameLine();
+                ImGui::TextUnformatted(ts_buf);
                 ImGui::PopStyleColor();
                 if (clicked) {
                     selected_row_ = row;
@@ -225,6 +232,8 @@ void LogView::render_inner() {
                     ImGui::SameLine(0, 2);
                 }
             }
+
+            ImGui::PopID(); // matches PushID(row) above
         }
     }
     clipper.End();
