@@ -14,6 +14,7 @@ typedef void* SDL_GLContext;
 #include "log_view.hpp"
 #include "detail_view.hpp"
 #include "breakdown_view.hpp"
+#include "filter_view.hpp"
 
 // ------------------------------------------------------------
 //  App
@@ -66,6 +67,7 @@ private:
     LogView         log_view_;
     DetailView      detail_view_;
     BreakdownView   breakdown_view_;
+    FilterView      filter_view_;
 
     // Which mmap file data pointer to use for detail view
     // (We keep one MmapFile per node, but for v0.0.1 we re-open on demand

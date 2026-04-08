@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <functional>
+#include <unordered_set>
 
 // Forward declarations
 struct LogEntry;
@@ -22,22 +23,32 @@ struct FilterState {
     // Text search (case-insensitive match against msg)
     std::string text_search;
 
-    // Category filters (0 = no filter)
-    uint32_t severity_filter   = 0;  // Severity cast to uint32
+    // Single-value category filters (0 = no filter)
+    uint32_t severity_filter   = 0;  // (Severity enum value + 1), 0 = all
     uint32_t component_idx     = 0;
     uint32_t op_type_idx       = 0;
-    uint32_t driver_idx        = 0;
+    uint32_t driver_idx        = 0;  // single driver from breakdown panel
     uint32_t ns_idx            = 0;
     uint32_t shape_idx         = 0;
 
+    // Set-based filters from the Filter window.
+    // Empty set = "show all". Non-empty = show only entries whose
+    // value is IN the set (i.e. user has left those boxes checked).
+    // We store the EXCLUDED values so the default (nothing excluded)
+    // is represented by an empty set, which is cheaper to check.
+    std::unordered_set<uint32_t> conn_id_exclude;     // raw conn_id values
+    std::unordered_set<uint32_t> driver_idx_exclude;  // StringTable indices
+
     bool active() const {
-        return !text_search.empty()  ||
-               severity_filter != 0 ||
-               component_idx   != 0 ||
-               op_type_idx     != 0 ||
-               driver_idx      != 0 ||
-               ns_idx          != 0 ||
-               shape_idx       != 0;
+        return !text_search.empty()        ||
+               severity_filter != 0       ||
+               component_idx   != 0       ||
+               op_type_idx     != 0       ||
+               driver_idx      != 0       ||
+               ns_idx          != 0       ||
+               shape_idx       != 0       ||
+               !conn_id_exclude.empty()   ||
+               !driver_idx_exclude.empty();
     }
 
     void clear() { *this = FilterState{}; }

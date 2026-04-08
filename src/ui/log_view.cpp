@@ -60,6 +60,12 @@ bool LogView::entry_matches(const LogEntry& e) const {
     if (filter_->ns_idx        && e.ns_idx         != filter_->ns_idx)        return false;
     if (filter_->shape_idx     && e.shape_idx      != filter_->shape_idx)     return false;
 
+    // Set-based exclusion filters (non-empty set = some items unchecked)
+    if (!filter_->conn_id_exclude.empty() &&
+        filter_->conn_id_exclude.count(e.conn_id)) return false;
+    if (!filter_->driver_idx_exclude.empty() &&
+        filter_->driver_idx_exclude.count(e.driver_idx)) return false;
+
     if (!filter_->text_search.empty() && strings_) {
         std::string_view msg = strings_->get(e.msg_idx);
         if (search_lower_.empty())

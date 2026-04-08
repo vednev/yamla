@@ -36,6 +36,9 @@ App::App() {
 
     breakdown_view_.set_filter(&filter_);
     breakdown_view_.set_on_filter_changed([this] { on_filter_changed(); });
+
+    filter_view_.set_filter(&filter_);
+    filter_view_.set_on_filter_changed([this] { on_filter_changed(); });
 }
 
 App::~App() {
@@ -130,6 +133,7 @@ void App::start_load(const std::vector<std::string>& paths) {
     // Reset state
     filter_.clear();
     detail_view_.set_entry(nullptr, nullptr, nullptr);
+    filter_view_.set_analysis(nullptr, nullptr); // clear stale data
     node_files_.clear();
     total_file_bytes_ = 0;
     load_duration_s_  = 0.0;
@@ -177,6 +181,14 @@ void App::render_menu_bar() {
             if (ImGui::MenuItem("Open Cluster (drag & drop files)")) {}
             ImGui::Separator();
             if (ImGui::MenuItem("Quit", "Alt+F4")) running_ = false;
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("View")) {
+            bool fv_open = filter_view_.is_open();
+            if (ImGui::MenuItem("Filters", nullptr, &fv_open)) {
+                if (fv_open) filter_view_.show();
+                else         filter_view_.hide();
+            }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Help")) {
@@ -302,12 +314,15 @@ void App::render_frame() {
                                    &cluster_->strings(), &nodes);
             breakdown_view_.set_analysis(&cluster_->analysis(),
                                           &cluster_->strings());
+            filter_view_.set_analysis(&cluster_->analysis(),
+                                       &cluster_->strings());
         }
         last_state = cur;
     }
 
     render_menu_bar();
-    render_dockspace(); // handles all three panels internally
+    render_dockspace();     // three-column host
+    filter_view_.render();  // floating filter window (no-op when closed)
 }
 
 // ------------------------------------------------------------

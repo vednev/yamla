@@ -19,18 +19,29 @@ struct CountEntry {
 using CountMap = std::vector<CountEntry>; // sorted descending by count
 
 // ------------------------------------------------------------
+//  ConnEntry — one unique connection ID with its entry count
+// ------------------------------------------------------------
+struct ConnEntry {
+    uint32_t conn_id = 0;
+    uint64_t count   = 0;
+};
+
+// ------------------------------------------------------------
 //  AnalysisResult
 //
 //  Produced by a single pass over all LogEntry objects.
 //  All string labels come from the shared StringTable.
 // ------------------------------------------------------------
 struct AnalysisResult {
-    CountMap by_severity;    // INFO / WARN / ERROR / ...
-    CountMap by_component;   // COMMAND / REPL / NETWORK / ...
-    CountMap by_op_type;     // find / insert / update / ...
-    CountMap by_driver;      // "pymongo 4.1.0" / ...
-    CountMap by_namespace;   // "db.collection"
-    CountMap by_shape;       // normalized query shapes
+    CountMap  by_severity;    // INFO / WARN / ERROR / ...
+    CountMap  by_component;   // COMMAND / REPL / NETWORK / ...
+    CountMap  by_op_type;     // find / insert / update / ...
+    CountMap  by_driver;      // "pymongo 4.1.0" / ...
+    CountMap  by_namespace;   // "db.collection"
+    CountMap  by_shape;       // normalized query shapes
+
+    // Unique connection IDs, sorted descending by entry count
+    std::vector<ConnEntry> by_conn_id;
 
     uint64_t total_entries   = 0;
     uint64_t entries_with_ns = 0;

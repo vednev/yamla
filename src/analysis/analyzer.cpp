@@ -29,7 +29,8 @@ AnalysisResult Analyzer::analyze(const ArenaVector<LogEntry>& entries,
                                   const StringTable& strings)
 {
     std::unordered_map<uint32_t, uint64_t> sev_map, comp_map, op_map,
-                                            drv_map, ns_map, shape_map;
+                                            drv_map, ns_map, shape_map,
+                                            conn_map;
     AnalysisResult r;
 
     for (size_t i = 0; i < entries.size(); ++i) {
@@ -43,6 +44,7 @@ AnalysisResult Analyzer::analyze(const ArenaVector<LogEntry>& entries,
         if (e.component_idx) comp_map[e.component_idx]++;
         if (e.op_type_idx)   op_map[e.op_type_idx]++;
         if (e.driver_idx)    drv_map[e.driver_idx]++;
+        if (e.conn_id)       conn_map[e.conn_id]++;
         if (e.ns_idx) {
             ns_map[e.ns_idx]++;
             ++r.entries_with_ns;
@@ -69,9 +71,18 @@ AnalysisResult Analyzer::analyze(const ArenaVector<LogEntry>& entries,
 
     r.by_component = sort_map(comp_map, strings);
     r.by_op_type   = sort_map(op_map,   strings);
-    r.by_driver     = sort_map(drv_map,  strings);
-    r.by_namespace  = sort_map(ns_map,   strings);
-    r.by_shape      = sort_map(shape_map, strings);
+    r.by_driver    = sort_map(drv_map,  strings);
+    r.by_namespace = sort_map(ns_map,   strings);
+    r.by_shape     = sort_map(shape_map, strings);
+
+    // Build conn ID list sorted descending by count
+    r.by_conn_id.reserve(conn_map.size());
+    for (auto& [id, cnt] : conn_map)
+        r.by_conn_id.push_back({ id, cnt });
+    std::sort(r.by_conn_id.begin(), r.by_conn_id.end(),
+              [](const ConnEntry& a, const ConnEntry& b) {
+                  return a.count > b.count;
+              });
 
     return r;
 }
