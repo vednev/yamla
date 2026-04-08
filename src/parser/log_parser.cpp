@@ -4,92 +4,141 @@
 #include <simdjson.h>
 #include <mutex>
 #include <thread>
-#include <vector>
 #include <cstring>
-#include <cstdio>
-#include <cassert>
 #include <algorithm>
 #include <chrono>
 #include <atomic>
+#include <unordered_map>
+#include <string_view>
+#include <string>
+#include <vector>
+#include <deque>
 
 // ------------------------------------------------------------
-//  Thread-local simdjson parser — no allocation contention
+//  Thread-local simdjson parser
 // ------------------------------------------------------------
 static thread_local simdjson::dom::parser tl_parser;
+
+// ------------------------------------------------------------
+//  Thread-local string batch
+//
+//  Workers accumulate all strings for a batch without locks.
+//  After the batch, one lock commits everything into the global
+//  StringTable in a single critical section.
+//
+//  owned: deque<string> — push_back never invalidates existing
+//         elements, so string_view keys never dangle.
+// ------------------------------------------------------------
+struct StringBatch {
+    std::deque<std::string>                                owned;
+    std::unordered_map<std::string_view, uint32_t, SvHash> cache;
+
+    void clear() { owned.clear(); cache.clear(); }
+
+    void stage(std::string_view sv) {
+        if (!sv.empty()) cache.emplace(sv, 0u);
+    }
+
+    std::string_view stage_owned(std::string&& s) {
+        if (s.empty()) return {};
+        owned.push_back(std::move(s));
+        std::string_view sv(owned.back());
+        cache.emplace(sv, 0u);
+        return sv;
+    }
+
+    uint32_t get(std::string_view sv) const {
+        if (sv.empty()) return 0;
+        auto it = cache.find(sv);
+        return (it != cache.end()) ? it->second : 0;
+    }
+};
+
+// Per-thread string batch (persistent — survives across batches to
+// avoid repeated malloc/free for the unordered_map's bucket array)
+static thread_local StringBatch tl_batch;
+
+// Per-thread staging vectors — persistent across batches to avoid
+// per-batch heap allocation.  Grow to high-water-mark and stay there.
+struct SVS { std::string_view comp, msg, ns, op, shape, drv; };
+static thread_local std::vector<LogEntry> tl_entries;
+static thread_local std::vector<SVS>      tl_svs;
 
 // ------------------------------------------------------------
 //  Helpers
 // ------------------------------------------------------------
 
-// Parse ISO-8601 timestamp to milliseconds since Unix epoch.
-// MongoDB 4.4+ format: "2024-01-15T10:23:45.123+00:00"
-// Returns -1 on parse failure.
-static int64_t parse_timestamp(std::string_view ts) {
-    if (ts.size() < 24) return -1;
-
-    struct tm t{};
-    int ms = 0;
-    // Parse: YYYY-MM-DDTHH:MM:SS.mmm
-    if (std::sscanf(ts.data(),
-                    "%4d-%2d-%2dT%2d:%2d:%2d.%3d",
-                    &t.tm_year, &t.tm_mon, &t.tm_mday,
-                    &t.tm_hour, &t.tm_min, &t.tm_sec, &ms) != 7) {
-        return -1;
-    }
-    t.tm_year -= 1900;
-    t.tm_mon  -= 1;
-    t.tm_isdst = 0;
-
-#if defined(_WIN32)
-    time_t epoch = _mkgmtime(&t);
-#else
-    time_t epoch = timegm(&t);
-#endif
-    if (epoch == (time_t)-1) return -1;
-    return static_cast<int64_t>(epoch) * 1000 + ms;
+// Pure-arithmetic UTC calendar → Unix epoch conversion.
+// No system calls, no timezone locks. Valid for 1970–2099.
+// On macOS, timegm() acquires a global timezone lock making it
+// serialise across threads — this is the lock-free alternative.
+static int64_t utc_to_epoch(int y, int mon, int d,
+                              int h, int mi, int sec) noexcept
+{
+    // Rata Die algorithm: reduce Jan/Feb to months 13/14 of prior year
+    y   -= (mon <= 2);
+    int era  = y / 400;
+    int yoe  = y - era * 400;                              // [0, 399]
+    int doy  = (153*(mon + (mon<=2 ? 9 : -3)) + 2)/5 + d - 1; // [0, 365]
+    int doe  = yoe*365 + yoe/4 - yoe/100 + doy;           // [0, 146096]
+    int64_t days = static_cast<int64_t>(era)*146097 + doe - 719468;
+    return days*86400 + h*3600 + mi*60 + sec;
 }
 
-// Extract a uint32_t connection number from a string like "conn123"
+static int64_t parse_timestamp(std::string_view ts) noexcept {
+    if (ts.size() < 23) return -1;
+    const char* s = ts.data();
+    // Validate separators
+    if (s[4]!='-'||s[7]!='-'||s[10]!='T'||
+        s[13]!=':'||s[16]!=':'||s[19]!='.') return -1;
+
+    auto d2=[s](int i) noexcept { return (s[i]-'0')*10+(s[i+1]-'0'); };
+    auto d4=[s](int i) noexcept {
+        return (s[i]-'0')*1000+(s[i+1]-'0')*100+
+               (s[i+2]-'0')*10+(s[i+3]-'0');
+    };
+
+    int y=d4(0), mo=d2(5), day=d2(8);
+    int h=d2(11), mi=d2(14), sec=d2(17);
+    int ms=d2(20)*10+(s[22]-'0');
+
+    return utc_to_epoch(y, mo, day, h, mi, sec) * 1000 + ms;
+}
+
 static uint32_t parse_conn_id(std::string_view ctx) {
-    // ctx looks like "conn1234" or "conn1234[...]"
-    size_t pos = ctx.find("conn");
-    if (pos == std::string_view::npos) return 0;
-    pos += 4;
-    uint32_t id = 0;
-    while (pos < ctx.size() && ctx[pos] >= '0' && ctx[pos] <= '9') {
-        id = id * 10 + static_cast<uint32_t>(ctx[pos] - '0');
-        ++pos;
+    for (size_t i=0; i+4<=ctx.size(); ++i) {
+        if (ctx[i]=='c'&&ctx[i+1]=='o'&&ctx[i+2]=='n'&&ctx[i+3]=='n') {
+            uint32_t id=0;
+            for (size_t p=i+4; p<ctx.size()&&ctx[p]>='0'&&ctx[p]<='9'; ++p)
+                id=id*10+(uint32_t)(ctx[p]-'0');
+            return id;
+        }
     }
-    return id;
+    return 0;
 }
 
-// Map MongoDB op strings to canonical names
 static std::string_view normalize_op(std::string_view cmd) {
-    if (cmd == "find")        return "find";
-    if (cmd == "insert")      return "insert";
-    if (cmd == "update")      return "update";
-    if (cmd == "delete")      return "delete";
-    if (cmd == "aggregate")   return "aggregate";
-    if (cmd == "count")       return "count";
-    if (cmd == "distinct")    return "distinct";
-    if (cmd == "getMore")     return "getMore";
-    if (cmd == "findAndModify" ||
-        cmd == "findandmodify") return "findAndModify";
-    if (cmd == "createIndexes") return "createIndexes";
-    if (cmd == "drop")        return "drop";
-    if (cmd == "listCollections") return "listCollections";
-    if (cmd == "ping")        return "ping";
-    if (cmd == "hello" ||
-        cmd == "isMaster" ||
-        cmd == "ismaster")   return "hello";
-    if (cmd == "replSetGetStatus") return "replSetGetStatus";
-    return cmd; // unknown — keep as-is
+    if (cmd=="find")            return "find";
+    if (cmd=="insert")          return "insert";
+    if (cmd=="update")          return "update";
+    if (cmd=="delete")          return "delete";
+    if (cmd=="aggregate")       return "aggregate";
+    if (cmd=="count")           return "count";
+    if (cmd=="distinct")        return "distinct";
+    if (cmd=="getMore")         return "getMore";
+    if (cmd=="findAndModify"||cmd=="findandmodify") return "findAndModify";
+    if (cmd=="createIndexes")   return "createIndexes";
+    if (cmd=="drop")            return "drop";
+    if (cmd=="listCollections") return "listCollections";
+    if (cmd=="ping")            return "ping";
+    if (cmd=="hello"||cmd=="isMaster"||cmd=="ismaster") return "hello";
+    if (cmd=="replSetGetStatus")return "replSetGetStatus";
+    return cmd;
 }
 
 // ------------------------------------------------------------
-//  LogParser constructor
+//  LogParser
 // ------------------------------------------------------------
-
 LogParser::LogParser(StringTable& strings, Config cfg)
     : strings_(strings), cfg_(cfg)
 {
@@ -97,209 +146,179 @@ LogParser::LogParser(StringTable& strings, Config cfg)
         cfg_.num_threads = std::max(1u, std::thread::hardware_concurrency());
 }
 
-// ------------------------------------------------------------
-//  Batch splitting
-// ------------------------------------------------------------
-
 std::vector<ParseBatch> LogParser::split_batches(const char* data, size_t size,
-                                                  size_t batch_size,
-                                                  uint16_t node_idx)
+                                                  size_t batch_size, uint16_t node_idx)
 {
     std::vector<ParseBatch> batches;
     if (size == 0) return batches;
-
     size_t pos = 0;
     while (pos < size) {
         size_t end = std::min(pos + batch_size, size);
-        // Advance to the next newline so we don't split a JSON line
         if (end < size) {
             while (end < size && data[end] != '\n') ++end;
-            if (end < size) ++end; // include the newline
+            if (end < size) ++end;
         }
-        ParseBatch b;
-        b.start     = data + pos;
-        b.length    = end - pos;
-        b.file_base = pos;
-        b.node_idx  = node_idx;
-        batches.push_back(b);
+        batches.push_back({data + pos, end - pos, pos, node_idx});
         pos = end;
     }
     return batches;
 }
 
-// ------------------------------------------------------------
-//  Single-line parse
-// ------------------------------------------------------------
-
-bool LogParser::parse_line(const char* line, size_t len, size_t file_offset,
-                            uint16_t node_idx, LogEntry& entry)
-{
-    if (len == 0 || line[0] != '{') return false;
-
-    simdjson::dom::element doc;
-    if (tl_parser.parse(line, len).get(doc) != simdjson::SUCCESS) return false;
-
-    // -- t (timestamp) --
-    simdjson::dom::element t_field;
-    if (doc["t"].get(t_field) != simdjson::SUCCESS) return false;
-    std::string_view ts_str;
-    simdjson::dom::element date_el;
-    if (t_field["$date"].get(date_el) == simdjson::SUCCESS) {
-        // {"$date": "2024-..."}
-        if (date_el.get_string().get(ts_str) != simdjson::SUCCESS) return false;
-    } else {
-        // plain string
-        if (t_field.get_string().get(ts_str) != simdjson::SUCCESS) return false;
-    }
-    entry.timestamp_ms = parse_timestamp(ts_str);
-
-    // -- s (severity) --
-    std::string_view sev_str;
-    if (doc["s"].get_string().get(sev_str) == simdjson::SUCCESS && !sev_str.empty())
-        entry.severity = severity_from_char(sev_str[0]);
-
-    // -- c (component) --
-    {
-        std::string_view comp;
-        if (doc["c"].get_string().get(comp) == simdjson::SUCCESS) {
-            std::lock_guard<std::mutex> lk(strings_mutex_);
-            entry.component_idx = strings_.intern(comp);
-        }
-    }
-
-    // -- ctx (context, contains conn ID) --
-    {
-        std::string_view ctx;
-        if (doc["ctx"].get_string().get(ctx) == simdjson::SUCCESS) {
-            entry.conn_id = parse_conn_id(ctx);
-        }
-    }
-
-    // -- msg --
-    {
-        std::string_view msg;
-        if (doc["msg"].get_string().get(msg) == simdjson::SUCCESS) {
-            std::lock_guard<std::mutex> lk(strings_mutex_);
-            entry.msg_idx = strings_.intern(msg);
-        }
-    }
-
-    // -- attr (attributes) --
-    simdjson::dom::element attr;
-    if (doc["attr"].get(attr) == simdjson::SUCCESS) {
-
-        // namespace
-        std::string_view ns;
-        if (attr["ns"].get_string().get(ns) == simdjson::SUCCESS) {
-            std::lock_guard<std::mutex> lk(strings_mutex_);
-            entry.ns_idx = strings_.intern(ns);
-        }
-
-        // durationMillis
-        int64_t dur = 0;
-        if (attr["durationMillis"].get_int64().get(dur) == simdjson::SUCCESS)
-            entry.duration_ms = static_cast<int32_t>(dur);
-
-        // command name — first key of the "command" sub-object
-        simdjson::dom::element cmd_obj;
-        if (attr["command"].get(cmd_obj) == simdjson::SUCCESS &&
-            cmd_obj.type() == simdjson::dom::element_type::OBJECT)
-        {
-            for (auto [k, v] : cmd_obj.get_object().value()) {
-                if (k.empty() || k[0] == '$') continue;
-                auto op = normalize_op(k);
-                std::lock_guard<std::mutex> lk(strings_mutex_);
-                entry.op_type_idx = strings_.intern(op);
-                break;
-            }
-
-            // Query shape — normalize the "filter" or "query" sub-object
-            simdjson::dom::element filter;
-            bool has_filter =
-                attr["command"]["filter"].get(filter) == simdjson::SUCCESS ||
-                attr["command"]["query"].get(filter) == simdjson::SUCCESS;
-
-            if (has_filter) {
-                // Serialize filter to JSON string, then normalize
-                std::string filter_json = simdjson::to_string(filter);
-                std::string shape = QueryShapeNormalizer::normalize(filter_json);
-                if (!shape.empty()) {
-                    std::lock_guard<std::mutex> lk(strings_mutex_);
-                    entry.shape_idx = strings_.intern(shape);
-                }
-            }
-        }
-
-        // Driver info (inside client metadata on "hello" / handshake messages)
-        simdjson::dom::element client;
-        if (attr["client"].get(client) == simdjson::SUCCESS) {
-            simdjson::dom::element driver;
-            if (client["driver"].get(driver) == simdjson::SUCCESS) {
-                std::string_view drv_name, drv_ver;
-                (void)driver["name"].get_string().get(drv_name);
-                (void)driver["version"].get_string().get(drv_ver);
-                if (!drv_name.empty()) {
-                    std::string full;
-                    full.reserve(drv_name.size() + 1 + drv_ver.size());
-                    full += drv_name;
-                    if (!drv_ver.empty()) { full += ' '; full += drv_ver; }
-                    std::lock_guard<std::mutex> lk(strings_mutex_);
-                    entry.driver_idx = strings_.intern(full);
-                }
-            }
-        }
-    }
-
-    entry.raw_offset = static_cast<uint32_t>(file_offset);
-    entry.raw_len    = static_cast<uint32_t>(len);
-    entry.node_idx   = node_idx;
-    entry.node_mask  = 1u << node_idx;
-
-    return true;
-}
+// Kept for header compatibility — unused in new impl
+void LogParser::reconcile_cache(LocalInternCache&) {}
 
 // ------------------------------------------------------------
-//  Batch parse — runs on a worker thread
+//  parse_batch
+//
+//  Uses thread-local persistent buffers to avoid per-batch
+//  heap allocation.  Flow:
+//    1. parse_many: iterate all docs, extract fields into
+//       tl_entries + tl_svs (no locks, no alloc beyond
+//       initial growth to high-water-mark)
+//    2. ONE mutex acquire: commit all unique strings to the
+//       global StringTable
+//    3. Fill LogEntry indices in-place from local cache
+//    4. Swap tl_entries contents into result (move, O(1))
 // ------------------------------------------------------------
-
 ParseResult LogParser::parse_batch(const ParseBatch& batch) {
     ParseResult result;
-    result.entries.reserve(4096);
 
-    const char* p   = batch.start;
-    const char* end = batch.start + batch.length;
+    tl_batch.clear();
+    tl_entries.clear();
+    tl_svs.clear();
 
-    while (p < end) {
-        // Find end of line
-        const char* nl = static_cast<const char*>(
-            std::memchr(p, '\n', static_cast<size_t>(end - p)));
-        const char* line_end = nl ? nl : end;
-        size_t      line_len = static_cast<size_t>(line_end - p);
-        size_t      offset   = static_cast<size_t>(p - batch.start) + batch.file_base;
+    simdjson::dom::document_stream stream;
+    if (tl_parser.parse_many(batch.start, batch.length,
+                              batch.length + 1).get(stream) != simdjson::SUCCESS) {
+        ++result.lines_failed;
+        return result;
+    }
 
-        // Trim trailing \r
-        if (line_len > 0 && p[line_len - 1] == '\r') --line_len;
+    for (auto it = stream.begin(); it != stream.end(); ++it) {
+        simdjson::dom::element doc;
+        if ((*it).get(doc) != simdjson::SUCCESS) { ++result.lines_failed; continue; }
 
-        LogEntry entry{};
-        if (line_len > 0) {
-            if (parse_line(p, line_len, offset, batch.node_idx, entry)) {
-                result.entries.push_back(entry);
-                ++result.lines_ok;
-            } else {
-                ++result.lines_failed;
+        LogEntry e{};
+        SVS      sv{};
+
+        e.node_idx   = batch.node_idx;
+        e.node_mask  = 1u << batch.node_idx;
+        e.raw_offset = static_cast<uint32_t>(batch.file_base + it.current_index());
+
+        // timestamp
+        simdjson::dom::element t_field;
+        if (doc["t"].get(t_field) != simdjson::SUCCESS) { ++result.lines_failed; continue; }
+        std::string_view ts;
+        simdjson::dom::element date_el;
+        if (t_field["$date"].get(date_el) == simdjson::SUCCESS)
+            (void)date_el.get_string().get(ts);
+        else
+            (void)t_field.get_string().get(ts);
+        e.timestamp_ms = parse_timestamp(ts);
+
+        // severity
+        std::string_view v;
+        if (doc["s"].get_string().get(v) == simdjson::SUCCESS && !v.empty())
+            e.severity = severity_from_char(v[0]);
+
+        // component
+        if (doc["c"].get_string().get(v)   == simdjson::SUCCESS) { sv.comp=v; tl_batch.stage(v); }
+        // ctx
+        if (doc["ctx"].get_string().get(v)  == simdjson::SUCCESS) e.conn_id = parse_conn_id(v);
+        // msg
+        if (doc["msg"].get_string().get(v)  == simdjson::SUCCESS) { sv.msg=v; tl_batch.stage(v); }
+
+        simdjson::dom::element attr;
+        if (doc["attr"].get(attr) == simdjson::SUCCESS) {
+            if (attr["ns"].get_string().get(v) == simdjson::SUCCESS)
+                { sv.ns=v; tl_batch.stage(v); }
+
+            int64_t dur = 0;
+            if (attr["durationMillis"].get_int64().get(dur) == simdjson::SUCCESS)
+                e.duration_ms = static_cast<int32_t>(dur);
+
+            simdjson::dom::element cmd_obj;
+            if (attr["command"].get(cmd_obj) == simdjson::SUCCESS &&
+                cmd_obj.type() == simdjson::dom::element_type::OBJECT)
+            {
+                for (auto [k, val] : cmd_obj.get_object().value()) {
+                    if (k.empty() || k[0]=='$') continue;
+                    sv.op = normalize_op(k);
+                    tl_batch.stage(sv.op);
+                    break;
+                }
+                simdjson::dom::element filter;
+                if (attr["command"]["filter"].get(filter) == simdjson::SUCCESS ||
+                    attr["command"]["query"].get(filter)  == simdjson::SUCCESS)
+                {
+                    std::string shape = QueryShapeNormalizer::normalize_element(filter);
+                    sv.shape = tl_batch.stage_owned(std::move(shape));
+                }
+            }
+
+            simdjson::dom::element client;
+            if (attr["client"].get(client) == simdjson::SUCCESS) {
+                simdjson::dom::element driver;
+                if (client["driver"].get(driver) == simdjson::SUCCESS) {
+                    std::string_view dn, dv;
+                    (void)driver["name"].get_string().get(dn);
+                    (void)driver["version"].get_string().get(dv);
+                    if (!dn.empty()) {
+                        std::string full;
+                        full.reserve(dn.size()+1+dv.size());
+                        full += dn;
+                        if (!dv.empty()) { full += ' '; full += dv; }
+                        sv.drv = tl_batch.stage_owned(std::move(full));
+                    }
+                }
             }
         }
 
-        p = nl ? nl + 1 : end;
+        // raw_len
+        const char* p  = batch.start + (e.raw_offset - batch.file_base);
+        const char* nl = static_cast<const char*>(
+            std::memchr(p, '\n', batch.length - (e.raw_offset - batch.file_base)));
+        e.raw_len = nl ? static_cast<uint32_t>(nl - p)
+                       : static_cast<uint32_t>(batch.length-(e.raw_offset-batch.file_base));
+
+        tl_entries.push_back(e);
+        tl_svs.push_back(sv);
+        ++result.lines_ok;
     }
+
+    // ---- ONE lock: commit all unique strings ----
+    if (!tl_batch.cache.empty()) {
+        std::lock_guard<std::mutex> lk(strings_mutex_);
+        for (auto& [sv2, idx] : tl_batch.cache)
+            idx = strings_.intern(sv2);
+    }
+
+    // ---- Fill indices in-place ----
+    for (size_t i = 0; i < tl_entries.size(); ++i) {
+        tl_entries[i].component_idx = tl_batch.get(tl_svs[i].comp);
+        tl_entries[i].msg_idx       = tl_batch.get(tl_svs[i].msg);
+        tl_entries[i].ns_idx        = tl_batch.get(tl_svs[i].ns);
+        tl_entries[i].op_type_idx   = tl_batch.get(tl_svs[i].op);
+        tl_entries[i].shape_idx     = tl_batch.get(tl_svs[i].shape);
+        tl_entries[i].driver_idx    = tl_batch.get(tl_svs[i].drv);
+    }
+
+    // Move tl_entries into result — O(1) swap, no copy
+    result.entries = std::move(tl_entries);
+    tl_batch.clear();
+
+    // Restore tl_entries capacity for next batch (move left it empty but
+    // capacity intact; re-assign an empty vector with pre-reserved capacity)
+    // Actually std::move leaves capacity in result.entries now; tl_entries
+    // is valid but empty with 0 capacity. Reserve for next batch:
+    tl_entries.reserve(result.entries.size());
 
     return result;
 }
 
 // ------------------------------------------------------------
-//  parse_file — public entry point
+//  parse_file
 // ------------------------------------------------------------
-
 void LogParser::parse_file(const MmapFile& file, uint16_t node_idx,
                             ArenaVector<LogEntry>& out,
                             ProgressCb progress_cb)
@@ -309,25 +328,14 @@ void LogParser::parse_file(const MmapFile& file, uint16_t node_idx,
     auto batches = split_batches(file.data(), file.size(),
                                  cfg_.batch_size_bytes, node_idx);
 
-    // Estimate total lines for progress reporting (~80 chars/line average)
-    size_t estimated_lines = std::max<size_t>(1, file.size() / 80);
-
-    // Results collected in order
+    size_t estimated_lines = std::max<size_t>(1, file.size() / 160);
     std::vector<ParseResult> results(batches.size());
-
-    // Dispatch batches to threads
-    std::vector<std::thread> workers;
-    workers.reserve(cfg_.num_threads);
-
-    // Use an atomic index to let threads pick up batches dynamically
-    std::atomic<size_t> next_batch{0};
-    std::atomic<size_t> done_lines{0};
+    std::atomic<size_t> next_batch{0}, done_lines{0};
 
     auto worker_fn = [&] {
         while (true) {
             size_t idx = next_batch.fetch_add(1, std::memory_order_relaxed);
             if (idx >= batches.size()) break;
-
             results[idx] = parse_batch(batches[idx]);
             done_lines.fetch_add(results[idx].lines_ok + results[idx].lines_failed,
                                  std::memory_order_relaxed);
@@ -335,26 +343,21 @@ void LogParser::parse_file(const MmapFile& file, uint16_t node_idx,
     };
 
     size_t nthreads = std::min<size_t>(cfg_.num_threads, batches.size());
-    for (size_t i = 0; i < nthreads; ++i)
-        workers.emplace_back(worker_fn);
+    std::vector<std::thread> workers;
+    workers.reserve(nthreads);
+    for (size_t i = 0; i < nthreads; ++i) workers.emplace_back(worker_fn);
 
-    // Poll progress while workers run
     if (progress_cb) {
-        while (true) {
-            size_t done = done_lines.load(std::memory_order_relaxed);
-            progress_cb(done, estimated_lines);
-            bool all_done = (next_batch.load() >= batches.size());
-            // Small sleep — this is the UI thread polling
-            if (all_done) break;
+        while (next_batch.load(std::memory_order_relaxed) < batches.size()) {
+            progress_cb(done_lines.load(std::memory_order_relaxed), estimated_lines);
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
     }
 
     for (auto& t : workers) t.join();
 
-    // Accumulate stats and append entries to output
     for (auto& r : results) {
-        lines_ok_.fetch_add(r.lines_ok, std::memory_order_relaxed);
+        lines_ok_.fetch_add(r.lines_ok,     std::memory_order_relaxed);
         lines_failed_.fetch_add(r.lines_failed, std::memory_order_relaxed);
         for (auto& e : r.entries) out.push_back(e);
     }

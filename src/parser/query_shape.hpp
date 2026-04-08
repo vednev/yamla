@@ -2,37 +2,34 @@
 
 #include <string>
 #include <string_view>
+#include <simdjson.h>
 
 // ------------------------------------------------------------
 //  QueryShapeNormalizer
 //
-//  Converts a parsed MongoDB query document (as a raw JSON
-//  string slice) into a normalized "shape" string where all
-//  values are replaced by type placeholders:
+//  Converts a MongoDB query/filter document into a normalized
+//  "shape" string where all values are replaced by type
+//  placeholders: {str}, {int}, {num}, {bool}, {null}, {oid},
+//  {date}, {regex}, {bin}, {ts}, [...], {...}
 //
-//    {str}   — string
-//    {int}   — integer (int64 / uint64)
-//    {num}   — double / decimal
-//    {bool}  — boolean
-//    {null}  — null
-//    {oid}   — ObjectId  {"$oid": "..."}
-//    {date}  — Date      {"$date": ...}
-//    {regex} — RegEx     {"$regex": ...}
-//    {bin}   — Binary    {"$binary": ...}
-//    {ts}    — Timestamp {"$timestamp": ...}
-//    [...]   — array (element types recursively normalized)
-//    {...}   — object (keys preserved, values replaced)
+//  Object keys are sorted so that key order doesn't matter.
 //
-//  Object keys are sorted so that {a:1,b:2} and {b:2,a:1}
-//  produce the same shape string.
-//
-//  The returned string is meant to be interned by the caller
-//  into a StringTable.
+//  Two entry points:
+//    normalize_element — takes an already-parsed simdjson element
+//                        (fast path — no re-parse)
+//    normalize         — takes a raw JSON string (used by detail view)
 // ------------------------------------------------------------
 
 class QueryShapeNormalizer {
 public:
-    // Normalize a raw JSON string slice (need not be null-terminated).
-    // Returns the shape string, or the raw input if it cannot be parsed.
+    // Fast path: normalise a simdjson element directly (no re-parse).
+    static std::string normalize_element(const simdjson::dom::element& el);
+
+    // Slow path: parse then normalise (kept for detail_view re-use).
     static std::string normalize(std::string_view json_doc);
+
+    // Recursive helpers — called from normalize_element
+    static void normalize_value(const simdjson::dom::element& el, std::string& out);
+    static void normalize_object(const simdjson::dom::element& el, std::string& out);
+    static void normalize_array(const simdjson::dom::element& el,  std::string& out);
 };

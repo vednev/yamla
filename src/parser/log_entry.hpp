@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <vector>
 #include <string>
+#include <functional>
 #include "../core/arena.hpp"
 
 // ------------------------------------------------------------
@@ -14,27 +15,68 @@
 //  Maps string -> uint32_t index. The actual string bytes are
 //  stored in the arena so lookups return stable string_views.
 //  Index 0 is reserved for "unknown" / empty.
+//
+//  Uses a heterogeneous hash/equal that accepts string_view
+//  directly — intern() never constructs a std::string heap
+//  object for a lookup that hits an existing entry.
 // ------------------------------------------------------------
+
+// Heterogeneous hash: accepts both std::string and std::string_view
+struct SvHash {
+    using is_transparent = void;
+    size_t operator()(std::string_view sv) const noexcept {
+        // FNV-1a — fast, good distribution, no alloc
+        size_t h = 14695981039346656037ULL;
+        for (unsigned char c : sv)
+            h = (h ^ c) * 1099511628211ULL;
+        return h;
+    }
+    size_t operator()(const std::string& s) const noexcept {
+        return (*this)(std::string_view(s));
+    }
+};
+
+struct SvEqual {
+    using is_transparent = void;
+    bool operator()(std::string_view a, std::string_view b) const noexcept {
+        return a == b;
+    }
+    bool operator()(const std::string& a, std::string_view b) const noexcept {
+        return std::string_view(a) == b;
+    }
+    bool operator()(std::string_view a, const std::string& b) const noexcept {
+        return a == std::string_view(b);
+    }
+    bool operator()(const std::string& a, const std::string& b) const noexcept {
+        return a == b;
+    }
+};
 
 class StringTable {
 public:
     static constexpr uint32_t UNKNOWN = 0;
 
     explicit StringTable(ArenaAllocator& arena) : arena_(&arena) {
-        // Reserve index 0 for "unknown"
-        strings_.push_back("");
-        index_map_[""] = 0;
+        // index 0 = empty/unknown — store a stable empty string_view
+        strings_.push_back(std::string_view("", 0));
+        // key is string_view pointing to static empty string — stable forever
+        index_map_.emplace(std::string_view("", 0), 0);
     }
 
     // Intern a string_view; returns its stable index.
+    // Hot path: lookup is string_view → no heap allocation for existing strings.
+    // Insert path: copy to arena first, then use arena pointer as stable key.
     uint32_t intern(std::string_view sv) {
-        auto it = index_map_.find(std::string(sv));
+        auto it = index_map_.find(sv);
         if (it != index_map_.end()) return it->second;
 
+        // New: copy bytes into the arena to get a stable address
         const char* stored = arena_->intern_string(sv.data(), sv.size());
+        std::string_view stable(stored, sv.size());
+
         uint32_t idx = static_cast<uint32_t>(strings_.size());
-        strings_.emplace_back(stored, sv.size());
-        index_map_.emplace(std::string(sv), idx);
+        strings_.push_back(stable);
+        index_map_.emplace(stable, idx); // key points into arena — no heap alloc
         return idx;
     }
 
@@ -46,9 +88,10 @@ public:
     size_t size() const { return strings_.size(); }
 
 private:
-    ArenaAllocator*                        arena_;
-    std::vector<std::string_view>          strings_;    // views into arena memory
-    std::unordered_map<std::string, uint32_t> index_map_;
+    ArenaAllocator*                                          arena_;
+    std::vector<std::string_view>                            strings_;
+    // Keys are string_views into arena memory — stable, zero-copy lookup
+    std::unordered_map<std::string_view, uint32_t, SvHash>   index_map_;
 };
 
 // ------------------------------------------------------------

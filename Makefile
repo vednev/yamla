@@ -21,7 +21,7 @@ SDL2_LIBS    := $(shell pkg-config --libs   sdl2 2>/dev/null)
 PKG_CFLAGS := $(CONAN_CFLAGS) $(SDL2_CFLAGS)
 PKG_LIBS   := $(CONAN_LIBS)   $(SDL2_LIBS)
 
-CXXFLAGS := -std=c++17 -O2 -Wall -Wextra -Wno-unused-parameter \
+CXXFLAGS := -std=c++17 -O3 -march=native -Wall -Wextra -Wno-unused-parameter \
             -Isrc \
             -I$(IMGUI_BIND) \
             $(PKG_CFLAGS)
