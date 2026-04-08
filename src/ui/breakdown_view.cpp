@@ -31,24 +31,31 @@ void BreakdownView::set_on_filter_changed(FilterChangedCb cb) {
 //  the same line as the caller (use after a CollapsingHeader).
 //  Only renders when `active` is true. Returns true if clicked.
 // ------------------------------------------------------------
-static bool inline_reset(const char* id, bool active, const char* tooltip = nullptr) {
+// btn_label: visible text (e.g. "Clear")
+// id_suffix: unique ImGui ID suffix (e.g. "##rst_Component")
+static bool inline_reset(const char* btn_label, const char* id_suffix,
+                          bool active, const char* tooltip = nullptr)
+{
     if (!active) return false;
     ImGui::SameLine();
-    float x = ImGui::GetContentRegionMax().x
-              - ImGui::CalcTextSize("x").x
-              - ImGui::GetStyle().FramePadding.x * 2.0f - 2.0f;
-    ImGui::SetCursorPosX(x);
 
-    // Allow this button to be clicked even though it overlaps the
-    // CollapsingHeader that was just rendered on the same line.
+    // Right-align based on the actual label width
+    float btn_w = ImGui::CalcTextSize(btn_label).x
+                  + ImGui::GetStyle().FramePadding.x * 2.0f;
+    ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - btn_w - 2.0f);
+
+    // Allow click even though we overlap the CollapsingHeader
     ImGui::SetNextItemAllowOverlap();
 
-    // Red tint for the reset button so it reads as "destructive / clear"
+    // Compose "label##suffix" for ImGui
+    char full_id[128];
+    std::snprintf(full_id, sizeof(full_id), "%s%s", btn_label, id_suffix);
+
     ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.0f,  0.0f,  0.0f,  1.0f));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.18f, 0.06f, 0.06f, 1.0f));
     ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.28f, 0.08f, 0.08f, 1.0f));
     ImGui::PushStyleColor(ImGuiCol_Text,          ImVec4(0.85f, 0.25f, 0.25f, 1.0f));
-    bool clicked = ImGui::SmallButton(id);
+    bool clicked = ImGui::SmallButton(full_id);
     ImGui::PopStyleColor(4);
 
     if (tooltip && ImGui::IsItemHovered())
@@ -103,7 +110,7 @@ void BreakdownView::render_bar_chart(const char* label, const CountMap& data,
     std::snprintf(reset_id, sizeof(reset_id), "x##rst_%s", label);
     char tooltip[128];
     std::snprintf(tooltip, sizeof(tooltip), "Clear %s filter", label);
-    if (inline_reset(reset_id, section_active, tooltip)) {
+    if (inline_reset("Clear", reset_id, section_active, tooltip)) {
         filter_->*field = 0;
         if (on_filter_changed_) on_filter_changed_();
     }
@@ -186,7 +193,7 @@ void BreakdownView::render_table(const char* label, const CountMap& data,
     std::snprintf(reset_id, sizeof(reset_id), "x##rst_%s", label);
     char tooltip[128];
     std::snprintf(tooltip, sizeof(tooltip), "Clear %s filter", label);
-    if (inline_reset(reset_id, section_active, tooltip)) {
+    if (inline_reset("Clear", reset_id, section_active, tooltip)) {
         filter_->*field = 0;
         if (on_filter_changed_) on_filter_changed_();
     }
@@ -269,7 +276,7 @@ void BreakdownView::render_table_multi(const char* label, const CountMap& data,
     std::snprintf(reset_id, sizeof(reset_id), "x##rst_%s", label);
     char tooltip[128];
     std::snprintf(tooltip, sizeof(tooltip), "Clear %s filter", label);
-    if (inline_reset(reset_id, section_active, tooltip)) {
+    if (inline_reset("Clear", reset_id, section_active, tooltip)) {
         (filter_->*set_field).clear();
         if (on_filter_changed_) on_filter_changed_();
     }
