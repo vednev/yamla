@@ -39,6 +39,10 @@ static bool inline_reset(const char* id, bool active, const char* tooltip = null
               - ImGui::GetStyle().FramePadding.x * 2.0f - 2.0f;
     ImGui::SetCursorPosX(x);
 
+    // Allow this button to be clicked even though it overlaps the
+    // CollapsingHeader that was just rendered on the same line.
+    ImGui::SetNextItemAllowOverlap();
+
     // Red tint for the reset button so it reads as "destructive / clear"
     ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.0f,  0.0f,  0.0f,  1.0f));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.18f, 0.06f, 0.06f, 1.0f));
