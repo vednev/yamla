@@ -1,0 +1,37 @@
+# Build artifacts
+build/
+dist/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+yamla
+
+# Conan
+.conan/
+conan_provider.cmake
+CMakeUserPresets.json
+graph_info.json
+conanbuildinfo.*
+conaninfo.txt
+conan.lock
+generators/
+
+# IDE
+.vscode/
+.idea/
+*.xcodeproj/
+*.xcworkspace/
+.DS_Store
+*.swp
+*.swo
+*~
+
+# ImGui runtime state
+imgui.ini
+
+# Dependency cache
+vendor/imgui/
+vendor/implot/
