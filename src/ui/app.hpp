@@ -15,7 +15,6 @@ typedef void* SDL_GLContext;
 #include "log_view.hpp"
 #include "detail_view.hpp"
 #include "breakdown_view.hpp"
-#include "filter_view.hpp"
 #include "font_manager.hpp"
 #include "prefs_view.hpp"
 
@@ -70,24 +69,18 @@ private:
     LogView         log_view_;
     DetailView      detail_view_;
     BreakdownView   breakdown_view_;
-    FilterView      filter_view_;
     FontManager     font_mgr_;
     PrefsView       prefs_view_;
     Prefs           prefs_;
 
-    // Which mmap file data pointer to use for detail view
-    // (We keep one MmapFile per node, but for v0.0.1 we re-open on demand
-    //  since detail view re-parses raw bytes directly from the mmap data).
-    // We store all open mmap files during a session.
     std::vector<std::unique_ptr<MmapFile>> node_files_;
 
-    bool      running_           = true;
+    bool      running_            = true;
     LoadState last_cluster_state_ = LoadState::Idle;
 
     // Panel dimensions — all user-draggable
-    float right_w_      = 420.0f;  // right (detail) panel width
-    float left_w_       = 280.0f;  // left column width
-    float filter_split_ = 0.40f;   // filter panel fraction of left column height
+    float right_w_ = 420.0f;  // right (detail) panel width
+    float left_w_  = 280.0f;  // left column width
 
     // Load statistics displayed in the menu bar
     size_t total_file_bytes_ = 0;

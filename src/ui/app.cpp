@@ -39,9 +39,6 @@ App::App() {
     breakdown_view_.set_filter(&filter_);
     breakdown_view_.set_on_filter_changed([this] { on_filter_changed(); });
 
-    filter_view_.set_filter(&filter_);
-    filter_view_.set_on_filter_changed([this] { on_filter_changed(); });
-
     prefs_view_.set_prefs(&prefs_);
     prefs_view_.set_on_changed([this](const Prefs& p) {
         prefs_ = p;
@@ -277,8 +274,7 @@ void App::start_load(const std::vector<std::string>& paths) {
     detail_view_.set_entry(nullptr, nullptr, nullptr);
     log_view_.set_entries(nullptr, 0, nullptr, nullptr); // clear raw ptr to old arena
     breakdown_view_.set_analysis(nullptr, nullptr);
-    filter_view_.set_analysis(nullptr, nullptr);
-    filter_view_.set_nodes(nullptr);
+    breakdown_view_.set_nodes(nullptr);
     node_files_.clear();
     total_file_bytes_   = 0;
     load_duration_s_    = 0.0;
@@ -413,41 +409,13 @@ void App::render_dockspace() {
     float h           = avail.y;
     float vsplitter_w = 6.0f; // vertical (left-column-width) splitter
 
-    // ---- Left column (draggable width) -------------------------
-    ImGui::BeginChild("##left_col", ImVec2(left_w_, h), false,
-                      ImGuiWindowFlags_NoScrollbar);
-    {
-        bool has_data = cluster_ && cluster_->state() == LoadState::Ready;
-
-        float breakdown_h = h * (1.0f - filter_split_) - vsplitter_w * 0.5f;
-        float filter_h    = h * filter_split_           - vsplitter_w * 0.5f;
-        breakdown_h = std::max(breakdown_h, 60.0f);
-        filter_h    = std::max(filter_h,    60.0f);
-
-        ImGui::BeginChild("##breakdowns", ImVec2(-1, breakdown_h), true);
-        if (has_data) breakdown_view_.render();
-        ImGui::EndChild();
-
-        // Horizontal splitter between breakdowns and filter panel
-        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0,0,0,0));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1,1,1,0.20f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(1,1,1,0.40f));
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0,0));
-        ImGui::Button("##vsplit", ImVec2(-1, vsplitter_w));
-        ImGui::PopStyleVar();
-        ImGui::PopStyleColor(3);
-        if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
-        if (ImGui::IsItemActive()) {
-            float delta = ImGui::GetIO().MouseDelta.y;
-            filter_split_ -= delta / h;
-            filter_split_  = std::max(0.10f, std::min(0.80f, filter_split_));
-        }
-
-        ImGui::BeginChild("##filterpanel", ImVec2(-1, filter_h), true);
-        if (has_data) filter_view_.render_inner();
-        else          ImGui::TextDisabled("Load a cluster to see filters.");
-        ImGui::EndChild();
-    }
+    // ---- Left column — single unified scrollable filter panel ----
+    bool has_data = cluster_ && cluster_->state() == LoadState::Ready;
+    ImGui::BeginChild("##left_col", ImVec2(left_w_, h), true);
+    if (has_data)
+        breakdown_view_.render();
+    else
+        ImGui::TextDisabled("Drop MongoDB log files here to begin.");
     ImGui::EndChild();
 
     // Splitter between left column and log view (controls left_w_)
@@ -612,9 +580,7 @@ void App::render_frame() {
                                    &cluster_->strings(), &nodes);
             breakdown_view_.set_analysis(&cluster_->analysis(),
                                           &cluster_->strings());
-            filter_view_.set_analysis(&cluster_->analysis(),
-                                       &cluster_->strings());
-            filter_view_.set_nodes(&cluster_->nodes());
+            breakdown_view_.set_nodes(&cluster_->nodes());
         }
         last_cluster_state_ = cur;
     }
