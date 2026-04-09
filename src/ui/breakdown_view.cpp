@@ -61,39 +61,24 @@ static bool red_clear_button(const char* id) {
 }
 
 // ------------------------------------------------------------
-//  inline_reset — renders a right-aligned "×" SmallButton on
-//  the same line as the caller (use after a CollapsingHeader).
-//  Only renders when `active` is true. Returns true if clicked.
+//  section_clear_button
+//
+//  Right-aligned red "Clear" SmallButton rendered INSIDE the
+//  open body of a CollapsingHeader (never on the header row).
+//  Returns true if clicked.  Only renders when active == true.
 // ------------------------------------------------------------
-// btn_label: visible text (e.g. "Clear")
-// id_suffix: unique ImGui ID suffix (e.g. "##rst_Component")
-static bool inline_reset(const char* btn_label, const char* id_suffix,
-                          bool active, const char* tooltip = nullptr)
+static bool section_clear_button(const char* id, bool active)
 {
     if (!active) return false;
-    ImGui::SameLine();
-
-    // Right-align based on the actual label width
-    float btn_w = ImGui::CalcTextSize(btn_label).x
+    float btn_w = ImGui::CalcTextSize("Clear").x
                   + ImGui::GetStyle().FramePadding.x * 2.0f;
     ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - btn_w - 2.0f);
-
-    // Allow click even though we overlap the CollapsingHeader
-    ImGui::SetNextItemAllowOverlap();
-
-    // Compose "label##suffix" for ImGui
-    char full_id[128];
-    std::snprintf(full_id, sizeof(full_id), "%s%s", btn_label, id_suffix);
-
     ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.0f,  0.0f,  0.0f,  1.0f));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.18f, 0.06f, 0.06f, 1.0f));
     ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.28f, 0.08f, 0.08f, 1.0f));
     ImGui::PushStyleColor(ImGuiCol_Text,          ImVec4(0.85f, 0.25f, 0.25f, 1.0f));
-    bool clicked = ImGui::SmallButton(full_id);
+    bool clicked = ImGui::SmallButton(id);
     ImGui::PopStyleColor(4);
-
-    if (tooltip && ImGui::IsItemHovered())
-        ImGui::SetTooltip("%s", tooltip);
     return clicked;
 }
 
@@ -138,18 +123,18 @@ void BreakdownView::render_bar_chart(const char* label, const CountMap& data,
     ImGui::PushID(label);
     bool open = ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen);
 
-    // Per-section reset — visible when this field has an active filter
-    bool section_active = filter_ && (filter_->*field) != 0;
-    char reset_id[64];
-    std::snprintf(reset_id, sizeof(reset_id), "##rst_%s", label);
-    char tooltip[128];
-    std::snprintf(tooltip, sizeof(tooltip), "Clear %s filter", label);
-    if (inline_reset("Clear", reset_id, section_active, tooltip)) {
-        filter_->*field = 0;
-        if (on_filter_changed_) on_filter_changed_();
-    }
-
     if (open) {
+        // Clear button inside the body — first item so it has exclusive click area.
+        // Placed here (not on the header row) because CollapsingHeader claims the
+        // full row width and intercepts all SameLine widgets regardless of overlap flags.
+        bool section_active = filter_ && (filter_->*field) != 0;
+        char clear_id[64];
+        std::snprintf(clear_id, sizeof(clear_id), "Clear##bc_%s", label);
+        if (section_clear_button(clear_id, section_active)) {
+            filter_->*field = 0;
+            if (on_filter_changed_) on_filter_changed_();
+        }
+
         float chart_h = std::min(180.0f, 24.0f * static_cast<float>(N) + 30.0f);
 
         ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(8, 4));
@@ -229,18 +214,16 @@ void BreakdownView::render_table(const char* label, const CountMap& data,
     ImGui::PushID(label);
     bool open = ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen);
 
-    // Per-section reset
-    bool section_active = filter_ && (filter_->*field) != 0;
-    char reset_id[64];
-    std::snprintf(reset_id, sizeof(reset_id), "##rst_%s", label);
-    char tooltip[128];
-    std::snprintf(tooltip, sizeof(tooltip), "Clear %s filter", label);
-    if (inline_reset("Clear", reset_id, section_active, tooltip)) {
-        filter_->*field = 0;
-        if (on_filter_changed_) on_filter_changed_();
-    }
-
     if (open) {
+        // Clear button inside the body — same fix as Component filter.
+        bool section_active = filter_ && (filter_->*field) != 0;
+        char clear_id[64];
+        std::snprintf(clear_id, sizeof(clear_id), "Clear##tbl_%s", label);
+        if (section_clear_button(clear_id, section_active)) {
+            filter_->*field = 0;
+            if (on_filter_changed_) on_filter_changed_();
+        }
+
         ImGuiTableFlags tf = ImGuiTableFlags_RowBg        |
                              ImGuiTableFlags_BordersOuter  |
                              ImGuiTableFlags_ScrollY        |
@@ -313,25 +296,11 @@ void BreakdownView::render_table_multi(const char* label, const CountMap& data,
     bool open = ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen);
 
     if (open) {
-        // Per-section Clear button — rendered INSIDE the open body, not on the
-        // header row. This avoids fighting CollapsingHeader for click ownership.
+        // Clear button inside the body — exclusive click area, no header conflict.
         bool section_active = filter_ && !(filter_->*set_field).empty();
-        if (section_active) {
-            float btn_w = ImGui::CalcTextSize("Clear").x
-                          + ImGui::GetStyle().FramePadding.x * 2.0f;
-            ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - btn_w - 2.0f);
-            ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.0f,  0.0f,  0.0f,  1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.18f, 0.06f, 0.06f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.28f, 0.08f, 0.08f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text,          ImVec4(0.85f, 0.25f, 0.25f, 1.0f));
-            bool clicked = ImGui::SmallButton("Clear##multi_rst");
-            ImGui::PopStyleColor(4);
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Clear component filter");
-            if (clicked && filter_) {
-                (filter_->*set_field).clear();
-                if (on_filter_changed_) on_filter_changed_();
-            }
+        if (section_clear_button("Clear##multi_rst", section_active) && filter_) {
+            (filter_->*set_field).clear();
+            if (on_filter_changed_) on_filter_changed_();
         }
         ImGuiTableFlags tf = ImGuiTableFlags_RowBg         |
                              ImGuiTableFlags_BordersOuter   |
