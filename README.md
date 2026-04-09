@@ -8,6 +8,7 @@ inspecting and filtering MongoDB 4.4+ structured JSON logs.
 > `mongos` router logs, or FTDC diagnostic data files.
 
 ## Screenshots
+#### The UI is being updated constantly at this point, so the screenshots may not accurately reflect the current state.
 
 **Start screen** — drop one or more `mongod` log files onto the window to begin.
 ![Start screen](screenshots/start_screen.png)
