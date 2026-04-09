@@ -88,6 +88,27 @@ Font and size are changed via **Edit → Preferences…** and persist to
 - Resizable detail panel (drag the splitter); word-wrap toggle
 - Multi-node cluster support with per-node colour badges
 
+## Releases
+
+Pre-built binaries are attached to each [GitHub Release](../../releases):
+
+| Platform | File |
+|---|---|
+| macOS (Apple Silicon) | `yamla-vX.Y.Z-macos-arm64.tar.gz` |
+| Linux x86\_64 | `yamla-vX.Y.Z-linux-amd64.tar.gz` |
+| Linux arm64 | `yamla-vX.Y.Z-linux-arm64.tar.gz` |
+
+**Runtime requirements:** macOS 12+; Linux requires `libsdl2-2.0-0`.
+
+To cut a new release:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+GitHub Actions builds all three binaries natively and publishes the release automatically.
+
 ## MongoDB log format
 
 Requires MongoDB 4.4+ structured JSON log format (one JSON object per line).

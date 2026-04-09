@@ -1,0 +1,194 @@
+name: Release
+
+# Trigger: push a semver tag  e.g. git tag v0.1.0 && git push --tags
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  # ─────────────────────────────────────────────────────────
+  #  macOS Apple Silicon (arm64)
+  #  Runner: macos-14 is GitHub's M1 runner
+  # ─────────────────────────────────────────────────────────
+  build-macos:
+    name: macOS (Apple Silicon)
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew install sdl2 pkg-config
+          pip3 install conan --break-system-packages 2>/dev/null || pip3 install conan
+          conan profile detect --force
+
+      - name: Install Conan packages
+        run: |
+          mkdir -p build/conan
+          conan install . \
+            --output-folder=build/conan \
+            --build=missing \
+            -s build_type=Release \
+            -s compiler.cppstd=17
+
+      - name: Build
+        run: make all
+
+      - name: Package
+        run: |
+          VERSION="${{ github.ref_name }}"
+          ARCHIVE="yamla-${VERSION}-macos-arm64.tar.gz"
+          tar -czf "$ARCHIVE" yamla vendor/fonts README.md
+          echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: yamla-macos-arm64
+          path: ${{ env.ARCHIVE }}
+
+  # ─────────────────────────────────────────────────────────
+  #  Linux x86_64 (amd64)
+  # ─────────────────────────────────────────────────────────
+  build-linux-amd64:
+    name: Linux (x86_64)
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            clang pkg-config \
+            libsdl2-dev libgl1-mesa-dev \
+            python3-pip
+          pip3 install conan
+          conan profile detect --force
+
+      - name: Install Conan packages
+        run: |
+          mkdir -p build/conan
+          conan install . \
+            --output-folder=build/conan \
+            --build=missing \
+            -s build_type=Release \
+            -s compiler.cppstd=17
+
+      - name: Build
+        run: make all
+
+      - name: Package
+        run: |
+          VERSION="${{ github.ref_name }}"
+          ARCHIVE="yamla-${VERSION}-linux-amd64.tar.gz"
+          tar -czf "$ARCHIVE" yamla vendor/fonts README.md
+          echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: yamla-linux-amd64
+          path: ${{ env.ARCHIVE }}
+
+  # ─────────────────────────────────────────────────────────
+  #  Linux arm64 (aarch64)
+  #  Runner: ubuntu-22.04-arm is GitHub's native arm64 runner
+  # ─────────────────────────────────────────────────────────
+  build-linux-arm64:
+    name: Linux (arm64)
+    runs-on: ubuntu-22.04-arm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            clang pkg-config \
+            libsdl2-dev libgl1-mesa-dev \
+            python3-pip
+          pip3 install conan
+          conan profile detect --force
+
+      - name: Install Conan packages
+        run: |
+          mkdir -p build/conan
+          conan install . \
+            --output-folder=build/conan \
+            --build=missing \
+            -s build_type=Release \
+            -s compiler.cppstd=17
+
+      - name: Build
+        run: make all
+
+      - name: Package
+        run: |
+          VERSION="${{ github.ref_name }}"
+          ARCHIVE="yamla-${VERSION}-linux-arm64.tar.gz"
+          tar -czf "$ARCHIVE" yamla vendor/fonts README.md
+          echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: yamla-linux-arm64
+          path: ${{ env.ARCHIVE }}
+
+  # ─────────────────────────────────────────────────────────
+  #  Create GitHub Release and attach all three binaries
+  # ─────────────────────────────────────────────────────────
+  release:
+    name: Create Release
+    needs: [build-macos, build-linux-amd64, build-linux-arm64]
+    runs-on: ubuntu-22.04
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "YAMLA ${{ github.ref_name }}"
+          body: |
+            ## YAMLA ${{ github.ref_name }}
+
+            Fast MongoDB log analyzer. Drop `mongod` 4.4+ structured JSON log files onto the window to begin.
+
+            > **Supported:** `mongod` server logs only. Not compatible with agent logs, Ops Manager logs, or FTDC files.
+
+            ### Downloads
+
+            | Platform | File |
+            |---|---|
+            | macOS (Apple Silicon) | `yamla-${{ github.ref_name }}-macos-arm64.tar.gz` |
+            | Linux x86\_64 | `yamla-${{ github.ref_name }}-linux-amd64.tar.gz` |
+            | Linux arm64 | `yamla-${{ github.ref_name }}-linux-arm64.tar.gz` |
+
+            Each archive contains the `yamla` binary, bundled fonts (`vendor/fonts/`), and `README.md`.
+
+            ### Runtime requirements
+
+            **macOS:** macOS 12 Monterey or later, Apple Silicon  
+            **Linux:** `libsdl2-2.0-0` (`apt install libsdl2-2.0-0` or equivalent)
+
+            ### Build from source
+
+            See [README.md](README.md).
+          files: dist/*
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
