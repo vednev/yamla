@@ -151,10 +151,22 @@ bool App::init() {
         return false;
     }
 
-    // Verify Metal is actually being used (optional diagnostic)
-    SDL_RendererInfo info{};
-    SDL_GetRendererInfo(renderer_, &info);
-    std::fprintf(stderr, "Renderer: %s\n", info.name);
+    // On HiDPI/Retina displays the renderer output size is larger than the
+    // logical window size (e.g. 2x on Retina). Tell SDL2 Renderer to scale
+    // its output so ImGui's logical-pixel draw calls fill the full physical
+    // framebuffer. Without this, ImGui renders in one quarter of the window.
+    {
+        int ww, wh, rw, rh;
+        SDL_GetWindowSize(window_, &ww, &wh);
+        SDL_GetRendererOutputSize(renderer_, &rw, &rh);
+        float scale_x = static_cast<float>(rw) / static_cast<float>(ww);
+        float scale_y = static_cast<float>(rh) / static_cast<float>(wh);
+        SDL_RenderSetScale(renderer_, scale_x, scale_y);
+        SDL_RendererInfo rinfo{};
+        SDL_GetRendererInfo(renderer_, &rinfo);
+        std::fprintf(stderr, "Renderer: %s  scale=%.2fx%.2f\n",
+                     rinfo.name, scale_x, scale_y);
+    }
 
 #elif defined(_WIN32)
     // Windows: create a plain window, then attach DX11 to its HWND.
