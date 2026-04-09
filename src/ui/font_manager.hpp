@@ -2,9 +2,9 @@
 
 #include <string>
 #include <vector>
+#include <functional>
 #include "../core/prefs.hpp"
 
-// Forward declarations — avoid pulling imgui.h into every header
 struct ImFont;
 
 // ------------------------------------------------------------
@@ -14,54 +14,54 @@ struct ImFont;
 //  and again (after marking rebuild_pending = true) whenever
 //  the user changes font preferences.
 //
-//  The rebuild must happen OUTSIDE an ImGui frame — the App
-//  checks rebuild_pending at the top of the frame loop before
-//  calling NewFrame.
+//  The backend-specific texture upload and destroy operations
+//  are provided as callbacks so FontManager has no dependency
+//  on any particular rendering backend (OpenGL, Metal, DX11…).
 //
-//  Usage pattern in the frame loop:
-//      if (font_mgr_.rebuild_pending) font_mgr_.rebuild();
-//      ImGui_ImplOpenGL3_NewFrame();
-//      ImGui_ImplSDL2_NewFrame();
-//      ImGui::NewFrame();
-//      font_mgr_.push();
-//      ... render ...
-//      font_mgr_.pop();
-//      ImGui::Render();
+//  App::init() provides the appropriate lambdas:
+//    macOS  — ImGui_ImplSDLRenderer2_CreateFontsTexture / Destroy
+//    Linux  — ImGui_ImplOpenGL3_CreateFontsTexture / Destroy
+//    Windows — ImGui_ImplDX11_CreateFontsTexture / Destroy
 // ------------------------------------------------------------
 class FontManager {
 public:
+    using UploadCb  = std::function<void()>;
+    using DestroyCb = std::function<void()>;
+
     FontManager() = default;
 
+    // Must be called before load(). Provides platform-appropriate
+    // font texture upload and destroy operations.
+    void set_callbacks(UploadCb upload, DestroyCb destroy);
+
     // Load fonts from vendor_dir for the given prefs.
-    // Must be called after ImGui::CreateContext() but before the first frame.
+    // Must be called after ImGui::CreateContext() and after
+    // set_callbacks(), but before the first frame.
     bool load(const Prefs& prefs, const std::string& vendor_dir);
 
     // Rebuild the atlas mid-session (outside a frame).
-    // Destroys old GL texture, rebuilds atlas, uploads new texture.
+    // Destroys old texture, rebuilds atlas, uploads new texture.
     bool rebuild(const Prefs& prefs, const std::string& vendor_dir);
 
     // Push the active font for the current frame.
     void push() const;
     void pop()  const;
 
-    // Set to true by PrefsView when the user clicks Apply.
-    // Checked and cleared by App at the top of the frame loop.
     bool rebuild_pending = false;
 
-    // Font names available in this installation (from vendor_dir).
     const std::vector<std::string>& available_fonts() const { return available_; }
-
-    // The vendor fonts directory path (stored so rebuild() can use it)
     const std::string& vendor_dir() const { return vendor_dir_; }
 
 private:
     bool load_internal(const Prefs& prefs, const std::string& vendor_dir,
                        bool destroy_first);
 
+    static const char* font_filename(const std::string& name);
+
     ImFont*                  active_font_ = nullptr;
     std::vector<std::string> available_;
     std::string              vendor_dir_;
 
-    // Map display name → filename stem
-    static const char* font_filename(const std::string& name);
+    UploadCb  upload_cb_;
+    DestroyCb destroy_cb_;
 };

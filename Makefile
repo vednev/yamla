@@ -6,13 +6,12 @@
 CXX      := clang++
 CONAN_PC := build/conan
 
-# Locate Conan-installed imgui bindings (backends need to be compiled from source)
+# Locate Conan-installed imgui bindings (backends compiled from source)
 IMGUI_PKG  := $(shell PKG_CONFIG_PATH=$(CONAN_PC) pkg-config --variable=prefix imgui 2>/dev/null)
 IMGUI_BIND := $(IMGUI_PKG)/res/bindings
 
-# Use Conan for imgui, implot, simdjson.
-# Use the system (Homebrew) SDL2 to avoid macOS version mismatch crashes
-# from the Conan-prebuilt SDL2 (built for macOS 26, mismatches the runtime).
+# Conan for imgui, implot, simdjson
+# SDL2 from Homebrew (system-native, avoids macOS malloc crash from Conan build)
 CONAN_CFLAGS := $(shell PKG_CONFIG_PATH=$(CONAN_PC) pkg-config --cflags imgui implot simdjson 2>/dev/null)
 CONAN_LIBS   := $(shell PKG_CONFIG_PATH=$(CONAN_PC) pkg-config --libs   imgui implot simdjson 2>/dev/null)
 SDL2_CFLAGS  := $(shell pkg-config --cflags sdl2 2>/dev/null)
@@ -21,32 +20,48 @@ SDL2_LIBS    := $(shell pkg-config --libs   sdl2 2>/dev/null)
 PKG_CFLAGS := $(CONAN_CFLAGS) $(SDL2_CFLAGS)
 PKG_LIBS   := $(CONAN_LIBS)   $(SDL2_LIBS)
 
+# ---- Platform detection ------------------------------------
+UNAME := $(shell uname)
+
+ifeq ($(UNAME), Darwin)
+  # macOS — SDL2 Renderer → Metal (CAMetalLayer, no OpenGL required)
+  PLATFORM_CFLAGS  :=
+  PLATFORM_LIBS    := -framework Metal -framework QuartzCore
+  BACKEND_SRCS     := $(IMGUI_BIND)/imgui_impl_sdl2.cpp \
+                      $(IMGUI_BIND)/imgui_impl_sdlrenderer2.cpp
+  BACKEND_OBJS     := build/obj/backends/imgui_impl_sdl2.o \
+                      build/obj/backends/imgui_impl_sdlrenderer2.o
+
+else ifeq ($(OS), Windows_NT)
+  # Windows — SDL2 window + DirectX 11 renderer
+  PLATFORM_CFLAGS  :=
+  PLATFORM_LIBS    := -ld3d11 -ldxgi -ld3dcompiler
+  BACKEND_SRCS     := $(IMGUI_BIND)/imgui_impl_sdl2.cpp \
+                      $(IMGUI_BIND)/imgui_impl_dx11.cpp
+  BACKEND_OBJS     := build/obj/backends/imgui_impl_sdl2.o \
+                      build/obj/backends/imgui_impl_dx11.o
+
+else
+  # Linux — SDL2 + OpenGL 3.3 (unchanged)
+  PLATFORM_CFLAGS  :=
+  PLATFORM_LIBS    := -lGL
+  BACKEND_SRCS     := $(IMGUI_BIND)/imgui_impl_sdl2.cpp \
+                      $(IMGUI_BIND)/imgui_impl_opengl3.cpp
+  BACKEND_OBJS     := build/obj/backends/imgui_impl_sdl2.o \
+                      build/obj/backends/imgui_impl_opengl3.o
+endif
+
+# ---- Flags -------------------------------------------------
 CXXFLAGS := -std=c++17 -O3 -march=native -Wall -Wextra -Wno-unused-parameter \
             -Isrc \
             -I$(IMGUI_BIND) \
-            $(PKG_CFLAGS)
+            $(PKG_CFLAGS) $(PLATFORM_CFLAGS)
 
-# Platform-specific OpenGL linking
-UNAME := $(shell uname)
-ifeq ($(UNAME), Darwin)
-  GL_LIBS := -framework OpenGL
-else ifeq ($(OS), Windows_NT)
-  GL_LIBS := -lopengl32
-else
-  GL_LIBS := -lGL
-endif
-
-LDFLAGS := $(PKG_LIBS) $(GL_LIBS)
+LDFLAGS := $(PKG_LIBS) $(PLATFORM_LIBS)
 
 TARGET   := yamla
 BUILDDIR := build/obj
 SRCDIR   := src
-
-# ImGui SDL2 + OpenGL3 backends (must compile from source — not in the lib)
-BACKEND_SRCS := $(IMGUI_BIND)/imgui_impl_sdl2.cpp \
-                $(IMGUI_BIND)/imgui_impl_opengl3.cpp
-BACKEND_OBJS := $(BUILDDIR)/backends/imgui_impl_sdl2.o \
-                $(BUILDDIR)/backends/imgui_impl_opengl3.o
 
 # Collect all .cpp files recursively under src/
 SRCS := $(shell find $(SRCDIR) -name '*.cpp')
@@ -60,7 +75,6 @@ ALL_OBJS := $(OBJS) $(BACKEND_OBJS)
 
 all: $(TARGET)
 
-# Install Conan deps and generate pkg-config files
 deps:
 	@echo "Installing Conan dependencies..."
 	/Library/Frameworks/Python.framework/Versions/3.13/bin/conan install . \
@@ -78,11 +92,8 @@ $(BUILDDIR)/%.o: $(SRCDIR)/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(BUILDDIR)/backends/imgui_impl_sdl2.o: $(IMGUI_BIND)/imgui_impl_sdl2.cpp
-	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -c $< -o $@
-
-$(BUILDDIR)/backends/imgui_impl_opengl3.o: $(IMGUI_BIND)/imgui_impl_opengl3.cpp
+# Rule for any backend .cpp → backend .o
+$(BUILDDIR)/backends/%.o: $(IMGUI_BIND)/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 

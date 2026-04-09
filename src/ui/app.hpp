@@ -8,7 +8,16 @@
 
 // Forward-declare SDL types to avoid polluting headers
 struct SDL_Window;
+struct SDL_Renderer;
 typedef void* SDL_GLContext;
+
+// Forward-declare DX11 types (Windows only)
+#if defined(_WIN32)
+struct ID3D11Device;
+struct ID3D11DeviceContext;
+struct IDXGISwapChain;
+struct ID3D11RenderTargetView;
+#endif
 
 #include "../analysis/cluster.hpp"
 #include "../core/prefs.hpp"
@@ -56,9 +65,24 @@ private:
     // Wired up to breakdown view filter changes
     void on_filter_changed();
 
-    // SDL/GL
+    // SDL window — always present
     SDL_Window*   window_  = nullptr;
+
+    // Platform/renderer handles — platform-specific
+#if defined(__APPLE__)
+    // macOS: SDL2 Renderer (Metal-backed via CAMetalLayer)
+    SDL_Renderer* renderer_ = nullptr;
+#elif defined(_WIN32)
+    // Windows: DirectX 11
+    SDL_Renderer*          renderer_        = nullptr; // unused, kept for SDL init path
+    ID3D11Device*          d3d_device_      = nullptr;
+    ID3D11DeviceContext*   d3d_context_     = nullptr;
+    IDXGISwapChain*        d3d_swapchain_   = nullptr;
+    ID3D11RenderTargetView* d3d_rtv_        = nullptr;
+#else
+    // Linux: OpenGL via SDL2
     SDL_GLContext gl_ctx_  = nullptr;
+#endif
 
     // Data
     std::unique_ptr<Cluster>    cluster_;
