@@ -4,6 +4,7 @@
 #include <implot.h>
 #include <cstring>
 #include <cctype>
+#include <cmath>
 #include <algorithm>
 #include <cstdio>
 
