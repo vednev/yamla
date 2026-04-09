@@ -52,7 +52,11 @@ else
 endif
 
 # ---- Flags -------------------------------------------------
-CXXFLAGS := -std=c++17 -O3 -march=native -Wall -Wextra -Wno-unused-parameter \
+# -march=native is skipped on CI (clang rejects it when it can't detect the
+# host microarchitecture, e.g. on GitHub's virtualised arm64 runners).
+# Use -O3 only; simdjson's runtime dispatch still selects the best SIMD path.
+MARCH := $(if $(CI),,-march=native)
+CXXFLAGS := -std=c++17 -O3 $(MARCH) -Wall -Wextra -Wno-unused-parameter \
             -Isrc \
             -I$(IMGUI_BIND) \
             $(PKG_CFLAGS) $(PLATFORM_CFLAGS)
