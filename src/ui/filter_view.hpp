@@ -8,6 +8,10 @@
 
 // ------------------------------------------------------------
 //  FilterView — connection IDs, driver types, and node filter
+//
+//  Connections are integrated as a collapsible section matching
+//  the style of the breakdown panel filters (no dedicated header,
+//  "Clear" button inside the body when active).
 // ------------------------------------------------------------
 class FilterView {
 public:
@@ -21,7 +25,6 @@ public:
     void set_filter(FilterState* filter);
     void set_on_filter_changed(FilterChangedCb cb);
 
-    // Render the contents directly — call inside an existing child window.
     void render_inner();
 
 private:
@@ -29,8 +32,6 @@ private:
     void render_conn_section();
     void render_driver_section();
 
-    void select_all_conn();
-    void clear_all_conn();
     void select_all_driver();
     void clear_all_driver();
 
