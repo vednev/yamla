@@ -6,6 +6,7 @@
 #include <vector>
 #include <functional>
 #include <unordered_set>
+#include "../core/chunk_vector.hpp"
 
 // Forward declarations
 struct LogEntry;
@@ -73,7 +74,7 @@ public:
 
     LogView() = default;
 
-    void set_entries(const LogEntry* entries, size_t count,
+    void set_entries(const ChunkVector<LogEntry>* entries,
                      const StringTable* strings,
                      const std::vector<NodeInfo>* nodes);
 
@@ -94,8 +95,7 @@ public:
 private:
     bool entry_matches(const LogEntry& e) const;
 
-    const LogEntry*              entries_    = nullptr;
-    size_t                       count_      = 0;
+    const ChunkVector<LogEntry>* entries_    = nullptr;
     const StringTable*           strings_    = nullptr;
     const std::vector<NodeInfo>* nodes_      = nullptr;
     FilterState*                 filter_     = nullptr;

@@ -73,10 +73,13 @@ private:
     PrefsView       prefs_view_;
     Prefs           prefs_;
 
-    std::vector<std::unique_ptr<MmapFile>> node_files_;
+    // node_files_ removed — mmaps are dropped after parsing; detail view
+    // re-opens files on demand via pread.
 
     bool      running_            = true;
     LoadState last_cluster_state_ = LoadState::Idle;
+    bool      sample_mode_        = false;  // true when file exceeded memory budget
+    float     sample_ratio_       = 1.0f;   // fraction of entries loaded (1.0 = full)
 
     // Panel dimensions — all user-draggable
     float right_w_ = 420.0f;  // right (detail) panel width

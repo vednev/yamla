@@ -7,7 +7,7 @@
 #include <string>
 
 #include "../parser/log_entry.hpp"
-#include "../core/arena_vector.hpp"
+#include "../core/chunk_vector.hpp"
 
 // ------------------------------------------------------------
 //  CountMap — a sorted-by-count snapshot used by the UI
@@ -61,7 +61,7 @@ class Analyzer {
 public:
     // Perform analysis over all entries. The StringTable is used
     // to resolve index → label strings.
-    static AnalysisResult analyze(const ArenaVector<LogEntry>& entries,
+    static AnalysisResult analyze(const ChunkVector<LogEntry>& entries,
                                   const StringTable& strings);
 
 private:

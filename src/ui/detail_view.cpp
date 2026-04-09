@@ -5,8 +5,17 @@
 #include <simdjson.h>
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 #include "../parser/log_entry.hpp"
+
+#if defined(_WIN32)
+#  define WIN32_LEAN_AND_MEAN
+#  include <windows.h>
+#else
+#  include <fcntl.h>
+#  include <unistd.h>
+#endif
 
 // ------------------------------------------------------------
 //  Thread-local parser for on-demand re-parse
@@ -182,11 +191,11 @@ static void render_element(const char* key,
 // ------------------------------------------------------------
 
 void DetailView::set_entry(const LogEntry* entry,
-                            const char* file_data,
+                            const std::string& file_path,
                             const StringTable* strings)
 {
     entry_     = entry;
-    file_data_ = file_data;
+    file_path_ = file_path;
     strings_   = strings;
 }
 
@@ -198,15 +207,43 @@ void DetailView::render_inner() {
     render_toolbar();
     ImGui::Separator();
 
-    if (!entry_ || !file_data_) {
+    if (!entry_ || file_path_.empty()) {
         ImGui::TextDisabled("Click a log entry to inspect it.");
         return;
     }
 
-    const char* raw  = file_data_ + entry_->raw_offset;
-    size_t      rlen = entry_->raw_len;
+    // Open the file, pread the log line, close immediately.
+    // This is the on-demand approach: no mmap is kept open between calls.
+    const uint64_t offset = entry_->raw_offset;
+    const size_t   rlen   = entry_->raw_len;
 
-    simdjson::padded_string padded(raw, rlen);
+    // Read rlen + SIMDJSON_PADDING bytes into a local buffer
+    std::vector<char> buf(rlen + simdjson::SIMDJSON_PADDING, '\0');
+
+#if defined(_WIN32)
+    HANDLE fh = CreateFileA(file_path_.c_str(), GENERIC_READ,
+                            FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                            FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (fh == INVALID_HANDLE_VALUE) {
+        ImGui::TextColored(ImVec4(1,0.3f,0.3f,1), "Cannot open file");
+        return;
+    }
+    LARGE_INTEGER li; li.QuadPart = static_cast<LONGLONG>(offset);
+    SetFilePointerEx(fh, li, nullptr, FILE_BEGIN);
+    DWORD read_bytes = 0;
+    ReadFile(fh, buf.data(), static_cast<DWORD>(rlen), &read_bytes, nullptr);
+    CloseHandle(fh);
+#else
+    int fd = ::open(file_path_.c_str(), O_RDONLY);
+    if (fd < 0) {
+        ImGui::TextColored(ImVec4(1,0.3f,0.3f,1), "Cannot open file");
+        return;
+    }
+    ::pread(fd, buf.data(), rlen, static_cast<off_t>(offset));
+    ::close(fd);
+#endif
+
+    simdjson::padded_string padded(buf.data(), rlen);
     simdjson::dom::element doc;
     auto err = tl_parser.parse(padded).get(doc);
     if (err) {
@@ -220,7 +257,6 @@ void DetailView::render_inner() {
         : ImGuiWindowFlags_HorizontalScrollbar;
 
     ImGui::BeginChild("##detail_scroll", ImVec2(0, 0), false, scroll_flags);
-    // Root context is "document"; top-level keys matched against "document" context
     render_object("document", doc, wrap_, "document", /*default_open=*/true);
     ImGui::EndChild();
 }

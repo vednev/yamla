@@ -28,12 +28,11 @@ static std::string to_lower(const std::string& s) {
 //  LogView::set_*
 // ------------------------------------------------------------
 
-void LogView::set_entries(const LogEntry* entries, size_t count,
+void LogView::set_entries(const ChunkVector<LogEntry>* entries,
                            const StringTable* strings,
                            const std::vector<NodeInfo>* nodes)
 {
     entries_ = entries;
-    count_   = count;
     strings_ = strings;
     nodes_   = nodes;
     rebuild_filter_index();
@@ -101,9 +100,9 @@ void LogView::rebuild_filter_index() {
     search_lower_.clear();
     filtered_indices_.clear();
     if (!entries_) return;
-    filtered_indices_.reserve(count_);
-    for (size_t i = 0; i < count_; ++i) {
-        if (entry_matches(entries_[i]))
+    filtered_indices_.reserve(entries_ ? entries_->size() : 0);
+    for (size_t i = 0; entries_ && i < entries_->size(); ++i) {
+        if (entry_matches((*entries_)[i]))
             filtered_indices_.push_back(i);
     }
     selected_row_ = -1;
@@ -161,7 +160,7 @@ void LogView::render_inner() {
 
         ImGui::Spacing();
         ImGui::TextDisabled("%zu / %zu entries",
-                    filtered_indices_.size(), count_);
+                    filtered_indices_.size(), (entries_ ? entries_->size() : 0));
         ImGui::Separator();
     }
 
@@ -191,7 +190,7 @@ void LogView::render_inner() {
     while (clipper.Step()) {
         for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
             size_t idx = filtered_indices_[static_cast<size_t>(row)];
-            const LogEntry& e = entries_[idx];
+            const LogEntry& e = (*entries_)[idx];
 
             ImGui::TableNextRow();
             ImGui::PushID(row);

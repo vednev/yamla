@@ -9,14 +9,12 @@
 #include <unordered_map>
 #include <mutex>
 
-#include "../core/arena.hpp"
-#include "../core/arena_vector.hpp"
 #include "../core/mmap_file.hpp"
+#include "../core/chunk_vector.hpp"
 #include "log_entry.hpp"
 
 // ------------------------------------------------------------
-//  ParseBatch — a contiguous range of lines from one file
-//  assigned to a single worker thread.
+//  ParseBatch
 // ------------------------------------------------------------
 struct ParseBatch {
     const char* start      = nullptr;
@@ -26,7 +24,7 @@ struct ParseBatch {
 };
 
 // ------------------------------------------------------------
-//  ParseResult — per-batch output from worker threads
+//  ParseResult
 // ------------------------------------------------------------
 struct ParseResult {
     std::vector<LogEntry> entries;
@@ -34,19 +32,10 @@ struct ParseResult {
     size_t lines_failed = 0;
 };
 
-// ------------------------------------------------------------
-//  Thread-local intern cache forward declaration
-//  (definition lives in log_parser.cpp)
-// ------------------------------------------------------------
 struct LocalInternCache;
 
 // ------------------------------------------------------------
 //  LogParser
-//
-//  Splits an mmap'd file into line-aligned batches, dispatches
-//  to worker threads using simdjson::parse_many per batch.
-//  Workers maintain thread-local intern caches to minimise
-//  mutex contention on the global StringTable.
 // ------------------------------------------------------------
 class LogParser {
 public:
@@ -55,13 +44,15 @@ public:
     struct Config {
         size_t   batch_size_bytes;
         unsigned num_threads;
-        Config() : batch_size_bytes(8 * 1024 * 1024), num_threads(0) {}
+        float    sample_ratio;   // 1.0 = full, <1.0 = sample every 1/ratio-th line
+        Config() : batch_size_bytes(8 * 1024 * 1024), num_threads(0), sample_ratio(1.0f) {}
     };
 
     LogParser(StringTable& strings, Config cfg = {});
 
+    // Output goes into a ChunkVector (unbounded capacity).
     void parse_file(const MmapFile& file, uint16_t node_idx,
-                    ArenaVector<LogEntry>& out,
+                    ChunkVector<LogEntry>& out,
                     ProgressCb progress_cb = nullptr);
 
     size_t total_lines_ok()     const { return lines_ok_; }
@@ -69,11 +60,10 @@ public:
 
 private:
     static std::vector<ParseBatch> split_batches(const char* data, size_t size,
-                                                 size_t batch_size,
-                                                 uint16_t node_idx);
+                                                  size_t batch_size,
+                                                  uint16_t node_idx);
 
     ParseResult parse_batch(const ParseBatch& batch);
-
     void reconcile_cache(LocalInternCache& cache);
 
     StringTable&        strings_;

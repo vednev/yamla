@@ -3,35 +3,31 @@
 #include <cstdint>
 #include <string>
 
-// Forward declarations
 struct LogEntry;
 class StringTable;
-class MmapFile;
 
 // ------------------------------------------------------------
 //  DetailView
 //
-//  Renders a collapsible ImGui JSON tree for the currently
-//  selected LogEntry. The raw JSON is re-parsed from the
-//  mmap'd file bytes on demand (only when selection changes).
+//  Renders a collapsible ImGui JSON tree for the selected entry.
 //
-//  Uses a thread-local simdjson parser (no allocations visible
-//  to the caller).
+//  The mmap is NOT held open between selections — instead the
+//  file path and byte offset are stored, and the file is opened
+//  on demand each time render_inner() is called.  On SSD this
+//  is imperceptible (<1ms).  This frees the mmap's virtual
+//  address space after parsing, enabling very large files.
 // ------------------------------------------------------------
 class DetailView {
 public:
     DetailView() = default;
 
     // Set the entry to display. Pass nullptr to clear.
-    // `file_data` must remain valid for the lifetime of the view.
+    // file_path: path to the original log file for this node.
     void set_entry(const LogEntry* entry,
-                   const char* file_data,
+                   const std::string& file_path,
                    const StringTable* strings);
 
-    // Render as a standalone ImGui window.
     void render();
-
-    // Render only the contents (no Begin/End) — use inside a child window.
     void render_inner();
 
     bool has_entry() const { return entry_ != nullptr; }
@@ -39,13 +35,9 @@ public:
 private:
     void render_toolbar();
 
-    // Render one key/value leaf — respects wrap_ flag.
-    void render_leaf(const char* key, const char* color_tag,
-                     const char* value_str) const;
-
     const LogEntry*    entry_     = nullptr;
-    const char*        file_data_ = nullptr;
+    std::string        file_path_;             // path to re-open on demand
     const StringTable* strings_   = nullptr;
 
-    bool wrap_ = true;   // text-wrap toggle controlled by toolbar checkbox (on by default)
+    bool wrap_ = true;
 };

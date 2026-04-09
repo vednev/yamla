@@ -52,8 +52,9 @@ Prefs PrefsManager::load() {
             out = static_cast<int>(std::strtol(pos, nullptr, 10));
     };
 
-    parse_str("\"font\"", p.font_name);
-    parse_int("\"size\"", p.font_size);
+    parse_str("\"font\"",   p.font_name);
+    parse_int("\"size\"",   p.font_size);
+    parse_int("\"mem_gb\"", p.memory_limit_gb);
 
     // Clamp size to valid range
     if (p.font_size < 10) p.font_size = 10;
@@ -78,7 +79,7 @@ void PrefsManager::save(const Prefs& p) {
 
     FILE* f = std::fopen(path.c_str(), "w");
     if (!f) return;
-    std::fprintf(f, "{\"font\":\"%s\",\"size\":%d}\n",
-                 p.font_name.c_str(), p.font_size);
+    std::fprintf(f, "{\"font\":\"%s\",\"size\":%d,\"mem_gb\":%d}\n",
+                 p.font_name.c_str(), p.font_size, p.memory_limit_gb);
     std::fclose(f);
 }

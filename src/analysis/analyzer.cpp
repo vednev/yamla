@@ -1,4 +1,5 @@
 #include "analyzer.hpp"
+#include "../core/chunk_vector.hpp"
 #include <algorithm>
 #include <climits>
 
@@ -25,7 +26,7 @@ CountMap Analyzer::sort_map(std::unordered_map<uint32_t, uint64_t>& raw,
 // ------------------------------------------------------------
 //  analyze — single pass O(N)
 // ------------------------------------------------------------
-AnalysisResult Analyzer::analyze(const ArenaVector<LogEntry>& entries,
+AnalysisResult Analyzer::analyze(const ChunkVector<LogEntry>& entries,
                                   const StringTable& strings)
 {
     std::unordered_map<uint32_t, uint64_t> sev_map, comp_map, op_map,

@@ -13,12 +13,11 @@
 #include <stdexcept>
 
 #include "../core/prefs.hpp"
+#include "../core/system_ram.hpp"
 
 // ---- Arena sizing ------------------------------------------
-// Default: 2 GB slab. For files larger than ~1.3 GB combined
-// the user should be prompted (future work). Arena exhaustion
-// will assert loudly.
-static constexpr size_t DEFAULT_ARENA_BYTES = 2ull * 1024 * 1024 * 1024;
+// Computed dynamically from system RAM and user preference.
+// See compute_arena_budget() in start_load().
 
 // ------------------------------------------------------------
 //  Constructor / Destructor
@@ -29,9 +28,10 @@ App::App() {
     log_view_.set_on_select([this](size_t idx) {
         if (!cluster_ || cluster_->state() != LoadState::Ready) return;
         const LogEntry& e = cluster_->entries()[idx];
-        if (e.node_idx < node_files_.size() && node_files_[e.node_idx]) {
+        // detail view re-opens the file on demand — just pass the path
+        if (e.node_idx < cluster_->nodes().size()) {
             detail_view_.set_entry(&e,
-                                   node_files_[e.node_idx]->data(),
+                                   cluster_->nodes()[e.node_idx].path,
                                    &cluster_->strings());
         }
     });
@@ -271,36 +271,60 @@ void App::start_load(const std::vector<std::string>& paths) {
     // frame can access dangling pointers between destruction and the new
     // cluster becoming ready.
     filter_.clear();
-    detail_view_.set_entry(nullptr, nullptr, nullptr);
-    log_view_.set_entries(nullptr, 0, nullptr, nullptr); // clear raw ptr to old arena
+    detail_view_.set_entry(nullptr, std::string{}, nullptr);
+    log_view_.set_entries(nullptr, nullptr, nullptr);
     breakdown_view_.set_analysis(nullptr, nullptr);
     breakdown_view_.set_nodes(nullptr);
-    node_files_.clear();
     total_file_bytes_   = 0;
     load_duration_s_    = 0.0;
-    last_cluster_state_ = LoadState::Idle; // reset so Ready transition fires on new load
+    sample_mode_        = false;
+    sample_ratio_       = 1.0f;
+    last_cluster_state_ = LoadState::Idle;
     load_start_         = std::chrono::steady_clock::now();
 
-    // Compute total file size to size the arena
+    // Measure total file size (stat only — don't mmap yet)
     size_t total_bytes = 0;
     for (const auto& p : paths) {
         try {
-            MmapFile f(p);
+            MmapFile f(p); // stat to get size
             total_bytes += f.size();
-            node_files_.push_back(std::make_unique<MmapFile>(std::move(f)));
+            // MmapFile destructs here — we don't need to keep it
         } catch (const std::exception& ex) {
             std::fprintf(stderr, "Cannot open %s: %s\n", p.c_str(), ex.what());
         }
     }
     total_file_bytes_ = total_bytes;
 
-    // Arena: 1.5× file size, at least 256 MB, at most DEFAULT_ARENA_BYTES
-    size_t arena_bytes = std::max<size_t>(
-        256ull * 1024 * 1024,
-        std::min<size_t>(DEFAULT_ARENA_BYTES,
-                         static_cast<size_t>(total_bytes * 1.5)));
+    // ---- Compute memory budget --------------------------------
+    // Budget = min(user_limit, 60% of total RAM), at least 256 MB.
+    // Needed = 1.5× file size (entries + interned strings overhead).
+    // If needed > budget we enter sample mode.
+    static constexpr size_t MIN_ARENA = 256ull * 1024 * 1024;
+    size_t total_ram = query_total_ram();
+    if (total_ram == 0) total_ram = 8ull * 1024 * 1024 * 1024; // fallback 8 GB
 
-    cluster_ = std::make_unique<Cluster>(arena_bytes);
+    size_t budget;
+    if (prefs_.memory_limit_gb > 0) {
+        budget = static_cast<size_t>(prefs_.memory_limit_gb) * 1024ull * 1024 * 1024;
+        budget = std::min(budget, static_cast<size_t>(total_ram * 0.85)); // never > 85% RAM
+    } else {
+        budget = static_cast<size_t>(total_ram * 0.60); // auto: 60%
+    }
+    budget = std::max(budget, MIN_ARENA);
+
+    size_t needed = std::max(MIN_ARENA, static_cast<size_t>(total_bytes * 1.5));
+
+    sample_mode_  = (needed > budget);
+    sample_ratio_ = sample_mode_
+                    ? static_cast<float>(budget) / static_cast<float>(needed)
+                    : 1.0f;
+
+    // Cluster uses ArenaChain internally — no upfront arena size needed.
+    // Budget is communicated via sample_ratio.
+    (void)needed; // used only to compute sample_ratio above
+
+    cluster_ = std::make_unique<Cluster>();
+    cluster_->set_sample_ratio(sample_ratio_);
     for (const auto& p : paths)
         cluster_->add_file(p);
 
@@ -574,9 +598,8 @@ void App::render_frame() {
             load_duration_s_ = std::chrono::duration<double>(
                 now - load_start_).count();
 
-            const auto& entries = cluster_->entries();
-            const auto& nodes   = cluster_->nodes();
-            log_view_.set_entries(entries.data(), entries.size(),
+            const auto& nodes = cluster_->nodes();
+            log_view_.set_entries(&cluster_->entries(),
                                    &cluster_->strings(), &nodes);
             breakdown_view_.set_analysis(&cluster_->analysis(),
                                           &cluster_->strings());
@@ -586,9 +609,26 @@ void App::render_frame() {
     }
 
     render_menu_bar();
-    render_dockspace();       // three-column host with filter panel pinned in left column
-    render_loading_popup();   // centered yellow progress popup while loading
-    prefs_view_.render();     // floating preferences window (no-op when closed)
+
+    // Sample mode banner — shown when file exceeded the memory budget
+    if (sample_mode_ && cluster_ && cluster_->state() == LoadState::Ready) {
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.25f, 0.18f, 0.0f, 1.0f));
+        ImGui::BeginChild("##sample_banner", ImVec2(-1, 30), false,
+                          ImGuiWindowFlags_NoScrollbar);
+        ImGui::PopStyleColor();
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 5);
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.85f, 0.2f, 1.0f));
+        ImGui::Text("  Sampled load: %.0f%% of entries shown — file exceeded memory budget"
+                    " (%.1f GB). Adjust in Edit > Preferences.",
+                    cluster_->sample_ratio() * 100.0f,
+                    static_cast<double>(total_file_bytes_) / (1024.0*1024.0*1024.0));
+        ImGui::PopStyleColor();
+        ImGui::EndChild();
+    }
+
+    render_dockspace();
+    render_loading_popup();
+    prefs_view_.render();
 }
 
 // ------------------------------------------------------------

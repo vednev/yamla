@@ -8,6 +8,7 @@
 #include <string>
 #include <functional>
 #include "../core/arena.hpp"
+#include "../core/arena_chain.hpp"
 
 // ------------------------------------------------------------
 //  String intern table
@@ -56,27 +57,25 @@ class StringTable {
 public:
     static constexpr uint32_t UNKNOWN = 0;
 
-    explicit StringTable(ArenaAllocator& arena) : arena_(&arena) {
-        // index 0 = empty/unknown — store a stable empty string_view
+    explicit StringTable(ArenaChain& chain) : chain_(&chain) {
         strings_.push_back(std::string_view("", 0));
-        // key is string_view pointing to static empty string — stable forever
         index_map_.emplace(std::string_view("", 0), 0);
     }
 
     // Intern a string_view; returns its stable index.
     // Hot path: lookup is string_view → no heap allocation for existing strings.
-    // Insert path: copy to arena first, then use arena pointer as stable key.
+    // Insert path: copy to arena chain first, then use arena pointer as stable key.
     uint32_t intern(std::string_view sv) {
         auto it = index_map_.find(sv);
         if (it != index_map_.end()) return it->second;
 
-        // New: copy bytes into the arena to get a stable address
-        const char* stored = arena_->intern_string(sv.data(), sv.size());
+        // New: copy bytes into the arena chain to get a stable address
+        const char* stored = chain_->intern_string(sv.data(), sv.size());
         std::string_view stable(stored, sv.size());
 
         uint32_t idx = static_cast<uint32_t>(strings_.size());
         strings_.push_back(stable);
-        index_map_.emplace(stable, idx); // key points into arena — no heap alloc
+        index_map_.emplace(stable, idx); // key points into chain — no heap alloc
         return idx;
     }
 
@@ -88,9 +87,8 @@ public:
     size_t size() const { return strings_.size(); }
 
 private:
-    ArenaAllocator*                                          arena_;
+    ArenaChain*   chain_;
     std::vector<std::string_view>                            strings_;
-    // Keys are string_views into arena memory — stable, zero-copy lookup
     std::unordered_map<std::string_view, uint32_t, SvHash>   index_map_;
 };
 
@@ -150,8 +148,9 @@ inline Severity severity_from_string(const char* s) {
 // ------------------------------------------------------------
 
 struct LogEntry {
-    // Raw JSON line position in the mmap'd file
-    uint32_t raw_offset  = 0;
+    // Raw JSON line position in the file.
+    // raw_offset is uint64_t to support files larger than 4 GB.
+    uint64_t raw_offset  = 0;
     uint32_t raw_len     = 0;
 
     // Parsed fields
@@ -178,5 +177,5 @@ struct LogEntry {
     uint32_t node_mask     = 0;
 };
 
-// Sanity check — keep LogEntry reasonably small
-static_assert(sizeof(LogEntry) <= 64, "LogEntry too large — review fields");
+// LogEntry is 64 bytes after raw_offset expanded to uint64_t
+static_assert(sizeof(LogEntry) <= 72, "LogEntry too large — review fields");

@@ -98,6 +98,19 @@ void PrefsView::render() {
     ImGui::SameLine(0, 8);
     ImGui::TextDisabled("(10–20 pt)");
 
+    // ---- Memory limit ------------------------------------------
+    ImGui::Spacing();
+    ImGui::Text("Memory");
+    ImGui::SameLine(80);
+    ImGui::SetNextItemWidth(72);
+    ImGui::InputInt("##mem_gb", &staging_.memory_limit_gb, 0, 0);
+    staging_.memory_limit_gb = std::max(0, std::min(512, staging_.memory_limit_gb));
+    ImGui::SameLine(0, 8);
+    if (staging_.memory_limit_gb == 0)
+        ImGui::TextDisabled("auto (60%% of RAM)");
+    else
+        ImGui::TextDisabled("GB limit (0 = auto)");
+
     // ---- Preview line ------------------------------------------
     ImGui::Spacing();
     ImGui::Separator();

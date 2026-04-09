@@ -208,16 +208,30 @@ ParseResult LogParser::parse_batch(const ParseBatch& batch) {
         return result;
     }
 
+    // Sampling: accept every sample_step-th document.
+    // sample_step = 1 means keep everything (no sampling).
+    const uint32_t sample_step = (cfg_.sample_ratio >= 1.0f || cfg_.sample_ratio <= 0.0f)
+        ? 1u
+        : static_cast<uint32_t>(1.0f / cfg_.sample_ratio + 0.5f);
+    uint32_t sample_counter = 0;
+
     for (auto it = stream.begin(); it != stream.end(); ++it) {
         simdjson::dom::element doc;
         if ((*it).get(doc) != simdjson::SUCCESS) { ++result.lines_failed; continue; }
+
+        // Apply sampling — skip entries that don't fall on a keep step
+        if (sample_step > 1) {
+            if (sample_counter++ % sample_step != 0) continue;
+        } else {
+            ++sample_counter;
+        }
 
         LogEntry e{};
         SVS      sv{};
 
         e.node_idx   = batch.node_idx;
         e.node_mask  = 1u << batch.node_idx;
-        e.raw_offset = static_cast<uint32_t>(batch.file_base + it.current_index());
+        e.raw_offset = static_cast<uint64_t>(batch.file_base + it.current_index());
 
         // timestamp
         simdjson::dom::element t_field;
@@ -336,10 +350,10 @@ ParseResult LogParser::parse_batch(const ParseBatch& batch) {
 }
 
 // ------------------------------------------------------------
-//  parse_file
+//  parse_file — output goes into a ChunkVector (unbounded)
 // ------------------------------------------------------------
 void LogParser::parse_file(const MmapFile& file, uint16_t node_idx,
-                            ArenaVector<LogEntry>& out,
+                            ChunkVector<LogEntry>& out,
                             ProgressCb progress_cb)
 {
     if (file.size() == 0) return;
