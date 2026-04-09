@@ -1,6 +1,6 @@
 # YAMLA
 
-Yet Another MongoDB Log Analyzer. Fast, terminal-aesthetic desktop GUI for
+Yet Another MongoDB Log Analyzer. Fast, and intended for
 inspecting and filtering MongoDB 4.4+ structured JSON logs.
 
 > **Supported log type:** `mongod` server logs only.
