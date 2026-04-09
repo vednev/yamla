@@ -4,6 +4,7 @@
 #include <vector>
 #include "../analysis/analyzer.hpp"
 #include "../analysis/cluster.hpp"
+#include "../core/prefs.hpp"
 #include "log_view.hpp"
 
 // ------------------------------------------------------------
@@ -26,6 +27,7 @@ public:
     void set_nodes(const std::vector<NodeInfo>* nodes);
     void set_filter(FilterState* filter);
     void set_on_filter_changed(FilterChangedCb cb);
+    void set_prefs(const Prefs* prefs);
 
     void render();
 
@@ -33,6 +35,9 @@ private:
     // Chart/table renders
     void render_bar_chart(const char* label, const CountMap& data,
                           uint32_t FilterState::*field, bool is_severity = false);
+    // Checkbox-list equivalent of render_bar_chart (used when prefer_checkboxes)
+    void render_bar_as_checkboxes(const char* label, const CountMap& data,
+                                  uint32_t FilterState::*field, bool is_severity = false);
     void render_table(const char* label, const CountMap& data,
                       uint32_t FilterState::*field);
     void render_table_multi(const char* label, const CountMap& data,
@@ -48,6 +53,7 @@ private:
     const StringTable*           strings_  = nullptr;
     const std::vector<NodeInfo>* nodes_    = nullptr;
     FilterState*                 filter_   = nullptr;
+    const Prefs*                 prefs_    = nullptr;
     FilterChangedCb              on_filter_changed_;
 
     // Per-section search buffers

@@ -55,6 +55,10 @@ Prefs PrefsManager::load() {
     parse_str("\"font\"",   p.font_name);
     parse_int("\"size\"",   p.font_size);
     parse_int("\"mem_gb\"", p.memory_limit_gb);
+    // prefer_checkboxes stored as 0/1 int
+    int ckbox = p.prefer_checkboxes ? 1 : 0;
+    parse_int("\"ckbox\"",  ckbox);
+    p.prefer_checkboxes = (ckbox != 0);
 
     // Clamp size to valid range
     if (p.font_size < 10) p.font_size = 10;
@@ -79,7 +83,8 @@ void PrefsManager::save(const Prefs& p) {
 
     FILE* f = std::fopen(path.c_str(), "w");
     if (!f) return;
-    std::fprintf(f, "{\"font\":\"%s\",\"size\":%d,\"mem_gb\":%d}\n",
-                 p.font_name.c_str(), p.font_size, p.memory_limit_gb);
+    std::fprintf(f, "{\"font\":\"%s\",\"size\":%d,\"mem_gb\":%d,\"ckbox\":%d}\n",
+                 p.font_name.c_str(), p.font_size, p.memory_limit_gb,
+                 p.prefer_checkboxes ? 1 : 0);
     std::fclose(f);
 }

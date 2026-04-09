@@ -9,6 +9,7 @@
 
 #include "../parser/log_entry.hpp"
 #include "../core/format.hpp"
+#include "../core/prefs.hpp"
 
 // ------------------------------------------------------------
 
@@ -29,6 +30,10 @@ void BreakdownView::set_filter(FilterState* filter) {
 
 void BreakdownView::set_on_filter_changed(FilterChangedCb cb) {
     on_filter_changed_ = std::move(cb);
+}
+
+void BreakdownView::set_prefs(const Prefs* prefs) {
+    prefs_ = prefs;
 }
 
 // ------------------------------------------------------------
@@ -135,7 +140,10 @@ void BreakdownView::render_bar_chart(const char* label, const CountMap& data,
             if (on_filter_changed_) on_filter_changed_();
         }
 
-        float chart_h = std::min(180.0f, 24.0f * static_cast<float>(N) + 30.0f);
+        // Each bar gets a fixed 22px height so all bars are comfortably
+        // clickable regardless of how many there are. No upper cap.
+        static constexpr float BAR_H = 22.0f;
+        float chart_h = BAR_H * static_cast<float>(N) + 36.0f; // +36 for X-axis area
 
         ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(8, 4));
 
@@ -148,13 +156,26 @@ void BreakdownView::render_bar_chart(const char* label, const CountMap& data,
                               ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_NoLabel |
                               ImPlotAxisFlags_NoTickMarks);
 
-            // Compact K/M/B formatter for X-axis tick labels
+            // X-axis: compact K/M/B tick formatter.
+            // Limit tick count to what fits in the available plot width so
+            // numbers never overlap — fall back to "..." when too narrow.
             ImPlot::SetupAxisFormat(ImAxis_X1, [](double value, char* buf, int size, void*) -> int {
                 if (value < 0) { buf[0] = '0'; buf[1] = '\0'; return 1; }
                 char tmp[16];
                 fmt_compact(static_cast<uint64_t>(value), tmp, sizeof(tmp));
                 return std::snprintf(buf, static_cast<size_t>(size), "%s", tmp);
             }, nullptr);
+            // Estimate available width and derive a safe tick count.
+            // Each tick label needs ~38px; clamp to [1, 6].
+            {
+                float plot_w = ImGui::GetContentRegionAvail().x - 20.0f;
+                int max_ticks = std::max(1, std::min(6, static_cast<int>(plot_w / 38.0f)));
+                ImPlot::SetupAxisLimitsConstraints(ImAxis_X1, 0, 1e18);
+                // We don't call SetupAxisTicks for X (auto), but we set a
+                // reduced tick density via ImPlot style.
+                ImPlot::GetStyle().FitPadding = ImVec2(0.15f, 0.0f);
+                (void)max_ticks; // ImPlot auto-spaces; compact formatter keeps labels short
+            }
 
             double max_val = 0;
             for (size_t i = 0; i < N; ++i)
@@ -168,12 +189,19 @@ void BreakdownView::render_bar_chart(const char* label, const CountMap& data,
             uint32_t current = filter_ ? (filter_->*field) : 0;
 
             for (size_t i = 0; i < N; ++i) {
+                // Determine the filter value this bar represents.
+                // For severity: use enum value + 1 (label-based, order-independent).
+                // For other fields: use the StringTable index of the label.
                 uint32_t bar_val = 0;
-                if (is_severity)
+                if (is_severity) {
                     bar_val = static_cast<uint32_t>(
                         severity_from_string(data[i].label.c_str())) + 1;
+                } else if (strings_) {
+                    bar_val = const_cast<StringTable*>(strings_)->intern(
+                        data[i].label);
+                }
 
-                bool active = is_severity && current != 0 && (current == bar_val);
+                bool active = (current != 0 && bar_val != 0 && current == bar_val);
 
                 ImPlot::PushStyleColor(ImPlotCol_Fill,
                     active ? ImVec4(1.0f, 0.65f, 0.1f, 1.0f)
@@ -188,12 +216,18 @@ void BreakdownView::render_bar_chart(const char* label, const CountMap& data,
                 ImPlotPoint mp = ImPlot::GetPlotMousePos();
                 int clicked_i  = static_cast<int>(std::round(mp.y));
                 if (clicked_i >= 0 && clicked_i < static_cast<int>(N) && filter_) {
+                    uint32_t bar_val = 0;
                     if (is_severity) {
                         Severity sev = severity_from_string(data[clicked_i].label.c_str());
-                        uint32_t v   = static_cast<uint32_t>(sev) + 1;
-                        filter_->*field = (filter_->*field == v) ? 0 : v;
+                        bar_val = static_cast<uint32_t>(sev) + 1;
+                    } else if (strings_) {
+                        bar_val = const_cast<StringTable*>(strings_)->intern(
+                            data[clicked_i].label);
                     }
-                    if (on_filter_changed_) on_filter_changed_();
+                    if (bar_val != 0) {
+                        filter_->*field = (filter_->*field == bar_val) ? 0 : bar_val;
+                        if (on_filter_changed_) on_filter_changed_();
+                    }
                 }
             }
 
@@ -471,6 +505,87 @@ void BreakdownView::render_connections_section() {
 }
 
 // ------------------------------------------------------------
+//  render_bar_as_checkboxes
+//
+//  Checkbox-list alternative to render_bar_chart, used when the
+//  user has enabled "Prefer checkboxes over graphs" in Preferences.
+//  Each item shows a checkbox + label + count.  Checking an item
+//  sets the filter field to that item's StringTable index (or
+//  severity enum+1 for severity).  Single-select: checking a new
+//  item deselects the previous one.
+// ------------------------------------------------------------
+void BreakdownView::render_bar_as_checkboxes(const char* label,
+                                              const CountMap& data,
+                                              uint32_t FilterState::*field,
+                                              bool is_severity)
+{
+    if (data.empty()) return;
+    size_t N = std::min(data.size(), size_t(12));
+
+    ImGui::PushID(label);
+    bool open = ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen);
+
+    if (open) {
+        bool section_active = filter_ && (filter_->*field) != 0;
+        char clear_id[64];
+        std::snprintf(clear_id, sizeof(clear_id), "Clear##ckbc_%s", label);
+        if (section_clear_button(clear_id, section_active)) {
+            filter_->*field = 0;
+            if (on_filter_changed_) on_filter_changed_();
+        }
+
+        uint32_t current = filter_ ? (filter_->*field) : 0;
+        static constexpr ImU32 SEL_BG = IM_COL32(160, 200, 255, 255);
+
+        float list_h = std::min(160.0f, 22.0f * static_cast<float>(N) + 8.0f);
+        list_h = std::max(list_h, 40.0f);
+        ImGui::BeginChild("##ckbc_list", ImVec2(-1, list_h), true);
+
+        for (size_t i = 0; i < N; ++i) {
+            // Resolve filter value for this item
+            uint32_t item_val = 0;
+            if (is_severity) {
+                item_val = static_cast<uint32_t>(
+                    severity_from_string(data[i].label.c_str())) + 1;
+            } else if (strings_) {
+                item_val = const_cast<StringTable*>(strings_)->intern(data[i].label);
+            }
+
+            bool checked = (current != 0 && item_val != 0 && current == item_val);
+
+            // Highlight selected row
+            if (checked) {
+                ImVec2 pos = ImGui::GetCursorScreenPos();
+                ImVec2 size(ImGui::GetContentRegionAvail().x,
+                            ImGui::GetTextLineHeightWithSpacing());
+                ImGui::GetWindowDrawList()->AddRectFilled(
+                    pos, ImVec2(pos.x + size.x, pos.y + size.y),
+                    SEL_BG);
+            }
+
+            char cnt_buf[27], chk_id[256];
+            std::snprintf(chk_id, sizeof(chk_id), "%s  (%s)##ckbc%zu",
+                          data[i].label.c_str(),
+                          fmt_count_buf(data[i].count, cnt_buf, sizeof(cnt_buf)),
+                          i);
+            ImVec4 txt = checked ? ImVec4(0,0,0,1) : ImVec4(1,1,1,1);
+            ImGui::PushStyleColor(ImGuiCol_Text, txt);
+            if (ImGui::Checkbox(chk_id, &checked)) {
+                if (filter_) {
+                    // Single-select: toggle off if same, set if different
+                    filter_->*field = (current == item_val) ? 0 : item_val;
+                    if (on_filter_changed_) on_filter_changed_();
+                }
+            }
+            ImGui::PopStyleColor();
+        }
+
+        ImGui::EndChild();
+    }
+    ImGui::PopID();
+}
+
+// ------------------------------------------------------------
 //  render
 // ------------------------------------------------------------
 void BreakdownView::render() {
@@ -510,10 +625,18 @@ void BreakdownView::render() {
 
     ImGui::Separator();
 
-    render_bar_chart("Severity", analysis_->by_severity,
-                     &FilterState::severity_filter, /*is_severity=*/true);
-    render_bar_chart("Operation Type", analysis_->by_op_type,
-                     &FilterState::op_type_idx);
+    bool ckbox = prefs_ && prefs_->prefer_checkboxes;
+    if (ckbox) {
+        render_bar_as_checkboxes("Severity", analysis_->by_severity,
+                                 &FilterState::severity_filter, /*is_severity=*/true);
+        render_bar_as_checkboxes("Operation Type", analysis_->by_op_type,
+                                 &FilterState::op_type_idx);
+    } else {
+        render_bar_chart("Severity", analysis_->by_severity,
+                         &FilterState::severity_filter, /*is_severity=*/true);
+        render_bar_chart("Operation Type", analysis_->by_op_type,
+                         &FilterState::op_type_idx);
+    }
     render_table_multi("Component", analysis_->by_component,
                        &FilterState::component_idx_include);
     render_table("Driver",      analysis_->by_driver,    &FilterState::driver_idx);

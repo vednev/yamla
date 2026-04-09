@@ -111,6 +111,15 @@ void PrefsView::render() {
     else
         ImGui::TextDisabled("GB limit (0 = auto)");
 
+    // ---- Filter display preference ----------------------------
+    ImGui::Spacing();
+    ImGui::Text("Filters");
+    ImGui::SameLine(80);
+    ImGui::Checkbox("Prefer checkboxes over graphs", &staging_.prefer_checkboxes);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Show Severity and Op Type as checkbox lists\n"
+                          "instead of bar charts");
+
     // ---- Preview line ------------------------------------------
     ImGui::Spacing();
     ImGui::Separator();

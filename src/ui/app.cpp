@@ -38,6 +38,7 @@ App::App() {
 
     breakdown_view_.set_filter(&filter_);
     breakdown_view_.set_on_filter_changed([this] { on_filter_changed(); });
+    breakdown_view_.set_prefs(&prefs_);
 
     prefs_view_.set_prefs(&prefs_);
     prefs_view_.set_on_changed([this](const Prefs& p) {
