@@ -51,7 +51,18 @@ AnalysisResult Analyzer::analyze(const ChunkVector<LogEntry>& entries,
             ++r.entries_with_ns;
         }
         if (e.shape_idx) shape_map[e.shape_idx]++;
-        if (e.duration_ms > 100) ++r.slow_queries;
+
+        // Count as a slow query only when MongoDB itself flagged it:
+        // the msg field starts with "Slow" (e.g. "Slow query",
+        // "Slow write operation"). Entries that merely have a high
+        // durationMillis but were not explicitly tagged are excluded.
+        if (e.msg_idx != 0) {
+            std::string_view msg = strings.get(e.msg_idx);
+            if (msg.size() >= 4 &&
+                (msg[0]=='S'||msg[0]=='s') &&
+                (msg[1]=='l') && (msg[2]=='o') && (msg[3]=='w'))
+                ++r.slow_queries;
+        }
 
         if (e.timestamp_ms < r.earliest_ms) r.earliest_ms = e.timestamp_ms;
         if (e.timestamp_ms > r.latest_ms)   r.latest_ms   = e.timestamp_ms;

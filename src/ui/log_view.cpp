@@ -63,7 +63,18 @@ bool LogView::entry_matches(const LogEntry& e) const {
     if (filter_->ns_idx        && e.ns_idx         != filter_->ns_idx)        return false;
     if (filter_->shape_idx     && e.shape_idx      != filter_->shape_idx)     return false;
 
-    if (filter_->slow_query_only && e.duration_ms <= 100) return false;
+    // Slow query filter: match only entries MongoDB explicitly tagged as slow
+    // (msg starts with "Slow"). Mirrors the count logic in Analyzer.
+    if (filter_->slow_query_only) {
+        bool is_slow = false;
+        if (strings_ && e.msg_idx != 0) {
+            std::string_view msg = strings_->get(e.msg_idx);
+            is_slow = (msg.size() >= 4 &&
+                       (msg[0]=='S'||msg[0]=='s') &&
+                       msg[1]=='l' && msg[2]=='o' && msg[3]=='w');
+        }
+        if (!is_slow) return false;
+    }
 
     // Set-based inclusion filters — non-empty means "show only these values"
     if (!filter_->conn_id_include.empty() &&
