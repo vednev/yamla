@@ -277,8 +277,9 @@ void App::start_load(const std::vector<std::string>& paths) {
     breakdown_view_.set_nodes(nullptr);
     total_file_bytes_   = 0;
     load_duration_s_    = 0.0;
-    sample_mode_        = false;
-    sample_ratio_       = 1.0f;
+    sample_mode_             = false;
+    sample_ratio_            = 1.0f;
+    sample_notice_dismissed_ = false;
     last_cluster_state_ = LoadState::Idle;
     load_start_         = std::chrono::steady_clock::now();
 
@@ -610,20 +611,54 @@ void App::render_frame() {
 
     render_menu_bar();
 
-    // Sample mode banner — shown when file exceeded the memory budget
-    if (sample_mode_ && cluster_ && cluster_->state() == LoadState::Ready) {
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.25f, 0.18f, 0.0f, 1.0f));
-        ImGui::BeginChild("##sample_banner", ImVec2(-1, 30), false,
-                          ImGuiWindowFlags_NoScrollbar);
+    // Sample mode popup — centered, dismissable, shown once per load
+    if (sample_mode_ && !sample_notice_dismissed_
+        && cluster_ && cluster_->state() == LoadState::Ready)
+    {
+        ImGui::OpenPopup("##sample_notice");
+    }
+
+    if (ImGui::BeginPopupModal("##sample_notice", nullptr,
+                                ImGuiWindowFlags_NoTitleBar |
+                                ImGuiWindowFlags_NoResize   |
+                                ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGuiIO& io = ImGui::GetIO();
+        ImGui::SetNextWindowPos(
+            ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f),
+            ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+
+        // Amber warning header
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.80f, 0.15f, 1.0f));
+        ImGui::Text("File too large for full load");
         ImGui::PopStyleColor();
-        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 5);
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.85f, 0.2f, 1.0f));
-        ImGui::Text("  Sampled load: %.0f%% of entries shown — file exceeded memory budget"
-                    " (%.1f GB). Adjust in Edit > Preferences.",
-                    cluster_->sample_ratio() * 100.0f,
-                    static_cast<double>(total_file_bytes_) / (1024.0*1024.0*1024.0));
-        ImGui::PopStyleColor();
-        ImGui::EndChild();
+
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::TextWrapped(
+            "This file (%.1f GB) exceeds the available memory budget.\n\n"
+            "Only %.0f%% of log entries have been loaded (every ~%d-th line).\n\n"
+            "Breakdown counts and analysis are approximate.\n\n"
+            "To load more entries, increase the memory limit in\n"
+            "Edit > Preferences > Memory.",
+            static_cast<double>(total_file_bytes_) / (1024.0 * 1024.0 * 1024.0),
+            cluster_->sample_ratio() * 100.0f,
+            std::max(1, static_cast<int>(1.0f / cluster_->sample_ratio() + 0.5f)));
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        float btn_w = 120.0f;
+        ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - btn_w) * 0.5f
+                             + ImGui::GetCursorPosX());
+        if (ImGui::Button("OK", ImVec2(btn_w, 0))) {
+            sample_notice_dismissed_ = true;
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
     }
 
     render_dockspace();

@@ -78,8 +78,9 @@ private:
 
     bool      running_            = true;
     LoadState last_cluster_state_ = LoadState::Idle;
-    bool      sample_mode_        = false;  // true when file exceeded memory budget
-    float     sample_ratio_       = 1.0f;   // fraction of entries loaded (1.0 = full)
+    bool      sample_mode_              = false;  // true when file exceeded memory budget
+    float     sample_ratio_             = 1.0f;   // fraction of entries loaded (1.0 = full)
+    bool      sample_notice_dismissed_  = false;  // user dismissed the sample popup
 
     // Panel dimensions — all user-draggable
     float right_w_ = 420.0f;  // right (detail) panel width
