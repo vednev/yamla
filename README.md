@@ -8,6 +8,18 @@ inspecting and filtering MongoDB 5.4+ structured JSON logs with a built-in chat 
 > `mongos` router logs, or FTDC diagnostic data files (FTDC is WIP on a separate
 > branch)
 
+## Releases
+
+Pre-built binaries are attached to each [GitHub Release](../../releases):
+
+| Platform | File |
+|---|---|
+| macOS (Apple Silicon) | `yamla-vX.Y.Z-macos-arm64.tar.gz` |
+| Linux x86\_64 | `yamla-vX.Y.Z-linux-amd64.tar.gz` |
+| Linux arm64 | `yamla-vX.Y.Z-linux-arm64.tar.gz` |
+
+**Runtime requirements:** macOS 12+; Linux requires `libsdl2-2.0-0`.
+
 ## Screenshots
 #### The UI is being updated constantly at this point, so the screenshots may not accurately reflect the current state.
 
@@ -124,18 +136,6 @@ in preferences (the "Export Dir" field). Press the Export button next to any
 assistant message to save it.
 
 Feel free to add support for more LLMs.
-
-## Releases
-
-Pre-built binaries are attached to each [GitHub Release](../../releases):
-
-| Platform | File |
-|---|---|
-| macOS (Apple Silicon) | `yamla-vX.Y.Z-macos-arm64.tar.gz` |
-| Linux x86\_64 | `yamla-vX.Y.Z-linux-amd64.tar.gz` |
-| Linux arm64 | `yamla-vX.Y.Z-linux-arm64.tar.gz` |
-
-**Runtime requirements:** macOS 12+; Linux requires `libsdl2-2.0-0`.
 
 To cut a new release:
 
