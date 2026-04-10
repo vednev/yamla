@@ -70,7 +70,8 @@ struct FilterState {
 // ------------------------------------------------------------
 class LogView {
 public:
-    using SelectCallback = std::function<void(size_t)>;
+    // Callback: (entry_index, selected_node_idx)
+    using SelectCallback = std::function<void(size_t, uint16_t)>;
 
     LogView() = default;
 
@@ -95,6 +96,9 @@ public:
 private:
     bool entry_matches(const LogEntry& e) const;
 
+    // Get the leftmost (lowest index) node from a node_mask bitmask.
+    static uint16_t leftmost_node(uint32_t mask);
+
     const ChunkVector<LogEntry>* entries_    = nullptr;
     const StringTable*           strings_    = nullptr;
     const std::vector<NodeInfo>* nodes_      = nullptr;
@@ -103,6 +107,8 @@ private:
 
     std::vector<size_t>          filtered_indices_;
     int                          selected_row_ = -1;
+    uint16_t                     selected_node_ = 0; // which node is active for detail view
+    bool                         sort_ascending_ = true; // timestamp sort direction
 
     // Cache for text-search lowercase conversion
     mutable std::string          search_lower_;

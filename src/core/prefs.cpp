@@ -60,9 +60,18 @@ Prefs PrefsManager::load() {
     parse_int("\"ckbox\"",  ckbox);
     p.prefer_checkboxes = (ckbox != 0);
 
+    // LLM fields
+    parse_str("\"llm_key\"",      p.llm_api_key);
+    parse_str("\"llm_endpoint\"", p.llm_endpoint);
+    parse_str("\"llm_model\"",    p.llm_model);
+    parse_int("\"llm_maxtok\"",   p.llm_max_tokens);
+    parse_str("\"export_dir\"",   p.export_dir);
+
     // Clamp size to valid range
     if (p.font_size < 10) p.font_size = 10;
     if (p.font_size > 20) p.font_size = 20;
+    if (p.llm_max_tokens < 256)  p.llm_max_tokens = 256;
+    if (p.llm_max_tokens > 32768) p.llm_max_tokens = 32768;
 
     return p;
 }
@@ -81,10 +90,26 @@ void PrefsManager::save(const Prefs& p) {
     ::mkdir(dir.c_str(), 0755);
 #endif
 
+    // Check if this is initial creation (file doesn't exist yet)
+    bool is_new = (std::fopen(path.c_str(), "r") == nullptr);
+
     FILE* f = std::fopen(path.c_str(), "w");
     if (!f) return;
-    std::fprintf(f, "{\"font\":\"%s\",\"size\":%d,\"mem_gb\":%d,\"ckbox\":%d}\n",
-                 p.font_name.c_str(), p.font_size, p.memory_limit_gb,
-                 p.prefer_checkboxes ? 1 : 0);
+    std::fprintf(f,
+        "{\"font\":\"%s\",\"size\":%d,\"mem_gb\":%d,\"ckbox\":%d,"
+        "\"llm_key\":\"%s\",\"llm_endpoint\":\"%s\","
+        "\"llm_model\":\"%s\",\"llm_maxtok\":%d,"
+        "\"export_dir\":\"%s\"}\n",
+        p.font_name.c_str(), p.font_size, p.memory_limit_gb,
+        p.prefer_checkboxes ? 1 : 0,
+        p.llm_api_key.c_str(), p.llm_endpoint.c_str(),
+        p.llm_model.c_str(), p.llm_max_tokens,
+        p.export_dir.c_str());
     std::fclose(f);
+
+#if !defined(_WIN32)
+    // Restrict permissions on initial creation — file contains API key
+    if (is_new)
+        ::chmod(path.c_str(), 0600);
+#endif
 }

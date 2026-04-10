@@ -120,6 +120,79 @@ void PrefsView::render() {
         ImGui::SetTooltip("Show Severity and Op Type as checkbox lists\n"
                           "instead of bar charts");
 
+    // ---- LLM configuration ------------------------------------
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.8f, 1.0f, 1.0f));
+    ImGui::Text("AI Assistant");
+    ImGui::PopStyleColor();
+    ImGui::Spacing();
+
+    ImGui::Text("API Key");
+    ImGui::SameLine(80);
+    ImGui::SetNextItemWidth(220);
+    // Use password-style input for the API key
+    static char key_buf[256] = {};
+    if (ImGui::IsWindowAppearing()) {
+        std::strncpy(key_buf, staging_.llm_api_key.c_str(), sizeof(key_buf) - 1);
+        key_buf[sizeof(key_buf) - 1] = '\0';
+    }
+    if (ImGui::InputText("##llm_key", key_buf, sizeof(key_buf),
+                         ImGuiInputTextFlags_Password))
+        staging_.llm_api_key = key_buf;
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Azure Foundry API key for the AI assistant");
+
+    ImGui::Spacing();
+    ImGui::Text("Endpoint");
+    ImGui::SameLine(80);
+    ImGui::SetNextItemWidth(220);
+    static char endpoint_buf[256] = {};
+    if (ImGui::IsWindowAppearing()) {
+        std::strncpy(endpoint_buf, staging_.llm_endpoint.c_str(),
+                     sizeof(endpoint_buf) - 1);
+        endpoint_buf[sizeof(endpoint_buf) - 1] = '\0';
+    }
+    if (ImGui::InputText("##llm_endpoint", endpoint_buf, sizeof(endpoint_buf)))
+        staging_.llm_endpoint = endpoint_buf;
+
+    ImGui::Spacing();
+    ImGui::Text("Model");
+    ImGui::SameLine(80);
+    ImGui::SetNextItemWidth(220);
+    static char model_buf[128] = {};
+    if (ImGui::IsWindowAppearing()) {
+        std::strncpy(model_buf, staging_.llm_model.c_str(),
+                     sizeof(model_buf) - 1);
+        model_buf[sizeof(model_buf) - 1] = '\0';
+    }
+    if (ImGui::InputText("##llm_model", model_buf, sizeof(model_buf)))
+        staging_.llm_model = model_buf;
+
+    ImGui::Spacing();
+    ImGui::Text("Max Tokens");
+    ImGui::SameLine(80);
+    ImGui::SetNextItemWidth(100);
+    ImGui::InputInt("##llm_maxtok", &staging_.llm_max_tokens, 256, 1024);
+    staging_.llm_max_tokens = std::max(256, std::min(32768, staging_.llm_max_tokens));
+
+    ImGui::Spacing();
+    ImGui::Text("Export Dir");
+    ImGui::SameLine(80);
+    ImGui::SetNextItemWidth(220);
+    static char export_buf[512] = {};
+    if (ImGui::IsWindowAppearing()) {
+        std::strncpy(export_buf, staging_.export_dir.c_str(),
+                     sizeof(export_buf) - 1);
+        export_buf[sizeof(export_buf) - 1] = '\0';
+    }
+    if (ImGui::InputText("##export_dir", export_buf, sizeof(export_buf)))
+        staging_.export_dir = export_buf;
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Directory for exported AI responses.\n"
+                          "Leave empty to disable export.");
+
     // ---- Preview line ------------------------------------------
     ImGui::Spacing();
     ImGui::Separator();

@@ -29,6 +29,8 @@
 #include <cstring>
 #include <algorithm>
 #include <stdexcept>
+#include <fstream>
+#include <sstream>
 
 #include "../core/prefs.hpp"
 #include "../core/system_ram.hpp"
@@ -91,15 +93,23 @@ static ID3D11RenderTargetView* create_dx11_rtv(IDXGISwapChain*  swapchain,
 
 App::App() {
     log_view_.set_filter(&filter_);
-    log_view_.set_on_select([this](size_t idx) {
+    log_view_.set_on_select([this](size_t idx, uint16_t node_idx) {
         if (!cluster_ || cluster_->state() != LoadState::Ready) return;
         const LogEntry& e = cluster_->entries()[idx];
-        // detail view re-opens the file on demand — just pass the path
-        if (e.node_idx < cluster_->nodes().size()) {
-            detail_view_.set_entry(&e,
-                                   cluster_->nodes()[e.node_idx].path,
-                                   &cluster_->strings());
-        }
+        const auto& nodes = cluster_->nodes();
+        if (node_idx >= nodes.size()) return;
+
+        // For stacked entries, look up the raw position for the selected node.
+        // This uses the dedup_alts_ map if the selected node isn't the primary.
+        uint64_t offset = e.raw_offset;
+        uint32_t len    = e.raw_len;
+        cluster_->get_node_raw(idx, node_idx, offset, len);
+
+        const std::string& path = nodes[node_idx].path;
+        detail_view_.set_entry(&e, path, &cluster_->strings(),
+                               offset, len);
+        // Also update LLM tools with the selected entry
+        llm_client_.tools().set_selected_entry(&e, path);
     });
 
     breakdown_view_.set_filter(&filter_);
@@ -111,7 +121,13 @@ App::App() {
         prefs_ = p;
         PrefsManager::save(p);
         font_mgr_.rebuild_pending = true;
+        // Re-configure LLM client with updated prefs
+        setup_llm();
     });
+
+    // Wire chat view
+    chat_view_.set_llm_client(&llm_client_);
+    chat_view_.set_prefs(&prefs_);
 }
 
 App::~App() {
@@ -396,6 +412,10 @@ bool App::init() {
     font_mgr_.load(prefs_, vendor_dir);
     prefs_view_.set_available_fonts(&font_mgr_.available_fonts());
 
+    // Load knowledge base and configure LLM
+    load_knowledge();
+    setup_llm();
+
     return true;
 }
 
@@ -427,6 +447,46 @@ void App::shutdown() {
 #endif
     if (window_) SDL_DestroyWindow(window_);
     SDL_Quit();
+}
+
+// ------------------------------------------------------------
+//  load_knowledge — read knowledge/*.md at startup
+// ------------------------------------------------------------
+void App::load_knowledge() {
+    // Read the single knowledge file
+    const char* path = "knowledge/knowledge.md";
+    std::ifstream f(path);
+    if (!f.is_open()) {
+        std::fprintf(stderr, "Warning: cannot open knowledge file: %s\n", path);
+        return;
+    }
+    std::ostringstream ss;
+    ss << f.rdbuf();
+    knowledge_text_ = ss.str();
+}
+
+// ------------------------------------------------------------
+//  setup_llm — configure the LLM client
+// ------------------------------------------------------------
+void App::setup_llm() {
+    llm_client_.set_prefs(&prefs_);
+
+    // Build system prompt: persona + knowledge
+    std::string system;
+    system += "You are a MongoDB log analysis assistant integrated into YAMLA "
+              "(a desktop MongoDB log analyzer tool). You help the user understand "
+              "patterns, diagnose issues, and find relevant log entries in their "
+              "loaded log data.\n\n"
+              "You have access to tools that can query the loaded log data: search "
+              "for entries, get analysis summaries, inspect slow queries, examine "
+              "connections, and find errors. Use these tools proactively to answer "
+              "the user's questions with concrete data.\n\n"
+              "When presenting findings, be concise but thorough. Reference specific "
+              "entry indices so the user can look them up. Use markdown formatting "
+              "for readability.\n\n"
+              "--- MONGODB LOG KNOWLEDGE BASE ---\n\n";
+    system += knowledge_text_;
+    llm_client_.set_system_prompt(system);
 }
 
 // ------------------------------------------------------------
@@ -776,8 +836,13 @@ void App::render_frame() {
             log_view_.set_entries(&cluster_->entries(),
                                    &cluster_->strings(), &nodes);
             breakdown_view_.set_analysis(&cluster_->analysis(),
-                                          &cluster_->strings());
+                                           &cluster_->strings());
             breakdown_view_.set_nodes(&cluster_->nodes());
+
+            // Wire LLM tools to the new cluster data
+            llm_client_.tools().set_cluster(cluster_.get());
+            // Clear conversation — old data context is stale
+            llm_client_.clear();
         }
         last_cluster_state_ = cur;
     }
@@ -837,6 +902,7 @@ void App::render_frame() {
     render_dockspace();
     render_loading_popup();
     prefs_view_.render();
+    chat_view_.render();
 }
 
 // ------------------------------------------------------------
@@ -861,6 +927,15 @@ int App::run() {
                     if (event.key.keysym.mod & KMOD_ALT &&
                         event.key.keysym.sym == SDLK_F4)
                         running_ = false;
+                    // Ctrl+A: toggle AI assistant chat
+                    if ((event.key.keysym.mod & KMOD_CTRL) &&
+                        event.key.keysym.sym == SDLK_a &&
+                        !ImGui::GetIO().WantTextInput)
+                        chat_view_.toggle();
+                    // Escape: close AI assistant chat
+                    if (event.key.keysym.sym == SDLK_ESCAPE &&
+                        chat_view_.is_open())
+                        chat_view_.close();
                     break;
 
                 case SDL_DROPFILE: {

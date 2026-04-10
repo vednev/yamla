@@ -21,11 +21,13 @@ struct ID3D11RenderTargetView;
 
 #include "../analysis/cluster.hpp"
 #include "../core/prefs.hpp"
+#include "../llm/llm_client.hpp"
 #include "log_view.hpp"
 #include "detail_view.hpp"
 #include "breakdown_view.hpp"
 #include "font_manager.hpp"
 #include "prefs_view.hpp"
+#include "chat_view.hpp"
 
 // ------------------------------------------------------------
 //  App
@@ -118,4 +120,12 @@ private:
     // Pending drag-and-drop file paths (accumulated between SDL_DROPFILE
     // and SDL_DROPCOMPLETE events)
     std::vector<std::string> pending_drops_;
+
+    // LLM chat integration
+    LlmClient   llm_client_;
+    ChatView     chat_view_;
+    std::string  knowledge_text_;   // loaded from knowledge/ at startup
+
+    void load_knowledge();          // reads knowledge/*.md into knowledge_text_
+    void setup_llm();               // configure client after prefs load
 };

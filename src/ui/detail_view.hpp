@@ -23,9 +23,13 @@ public:
 
     // Set the entry to display. Pass nullptr to clear.
     // file_path: path to the original log file for this node.
+    // For stacked entries, override_offset/override_len let the caller
+    // specify a different node's raw position within its file.
     void set_entry(const LogEntry* entry,
                    const std::string& file_path,
-                   const StringTable* strings);
+                   const StringTable* strings,
+                   uint64_t override_offset = 0,
+                   uint32_t override_len = 0);
 
     void render();
     void render_inner();
@@ -38,6 +42,10 @@ private:
     const LogEntry*    entry_     = nullptr;
     std::string        file_path_;             // path to re-open on demand
     const StringTable* strings_   = nullptr;
+
+    // Override raw position for stacked entries (0 = use entry's own)
+    uint64_t           override_offset_ = 0;
+    uint32_t           override_len_    = 0;
 
     bool wrap_ = true;
 };

@@ -19,11 +19,16 @@ void Cluster::add_file(const std::string& path) {
 std::string Cluster::infer_hostname(const MmapFile& file,
                                      const std::string& path) {
     if (file.size() > 0) {
-        size_t scan_len = std::min<size_t>(file.size(), 8192);
+        // Scan up to 64KB — "Process Details" appears in the first few
+        // startup lines but there can be preamble. 64KB is plenty.
+        size_t scan_len = std::min<size_t>(file.size(), 65536);
         const char* p   = file.data();
         const char* end = p + scan_len;
 
         simdjson::dom::parser parser;
+
+        // Best candidate so far (from top-level "host" field)
+        std::string fallback_host;
 
         while (p < end) {
             const char* nl = static_cast<const char*>(
@@ -35,20 +40,57 @@ std::string Cluster::infer_hostname(const MmapFile& file,
                 simdjson::padded_string ps(p, line_len);
                 simdjson::dom::element doc;
                 if (parser.parse(ps).get(doc) == simdjson::SUCCESS) {
-                    std::string_view host;
-                    if (doc["host"].get_string().get(host) == simdjson::SUCCESS
-                        && !host.empty()
-                        && host != "mongod"
-                        && host != "mongos"
-                        && host != "mongo")
+                    // Priority 1: look for "Process Details" msg — attr.host
+                    // has the real FQDN (e.g. "myhost.example.com:27017")
+                    std::string_view msg;
+                    if (doc["msg"].get_string().get(msg) == simdjson::SUCCESS &&
+                        msg == "Process Details")
                     {
-                        return std::string(host);
+                        simdjson::dom::element attr;
+                        std::string_view host;
+                        if (doc["attr"].get(attr) == simdjson::SUCCESS &&
+                            attr["host"].get_string().get(host) == simdjson::SUCCESS &&
+                            !host.empty())
+                        {
+                            // Strip the port suffix if present (e.g. ":27017")
+                            std::string h(host);
+                            size_t colon = h.rfind(':');
+                            if (colon != std::string::npos) {
+                                // Only strip if what follows the colon is all digits (a port)
+                                bool all_digits = true;
+                                for (size_t ci = colon + 1; ci < h.size(); ++ci) {
+                                    if (h[ci] < '0' || h[ci] > '9') {
+                                        all_digits = false;
+                                        break;
+                                    }
+                                }
+                                if (all_digits && colon + 1 < h.size())
+                                    h = h.substr(0, colon);
+                            }
+                            return h;
+                        }
+                    }
+
+                    // Priority 2: top-level "host" field (skip mongod/mongos)
+                    if (fallback_host.empty()) {
+                        std::string_view host;
+                        if (doc["host"].get_string().get(host) == simdjson::SUCCESS
+                            && !host.empty()
+                            && host != "mongod"
+                            && host != "mongos"
+                            && host != "mongo")
+                        {
+                            fallback_host = std::string(host);
+                        }
                     }
                 }
             }
             if (!nl) break;
             p = nl + 1;
         }
+
+        if (!fallback_host.empty())
+            return fallback_host;
     }
 
     // Derive from filename stem
@@ -81,9 +123,14 @@ void Cluster::dedup_entries() {
     std::vector<size_t> keep;
     keep.reserve(n);
 
+    // Temporary map: keep-index -> vector of merged entries' raw positions
+    // We use the position in the keep vector as the key (final entry index).
+    std::unordered_map<size_t, std::vector<DedupAlt>> alts;
+
     for (size_t i = 0; i < n; ++i) {
         if (merged[i]) continue;
         LogEntry& ei = (*entries_)[i];
+        size_t keep_idx = keep.size();
         keep.push_back(i);
 
         for (size_t j = i + 1; j < n; ++j) {
@@ -98,6 +145,9 @@ void Cluster::dedup_entries() {
                 ej.node_idx      != ei.node_idx)
             {
                 ei.node_mask |= ej.node_mask;
+                // Save the merged entry's raw position so we can
+                // show any node's version of this stacked entry.
+                alts[keep_idx].push_back({ej.node_idx, ej.raw_offset, ej.raw_len});
                 merged[j] = true;
             }
         }
@@ -109,6 +159,7 @@ void Cluster::dedup_entries() {
         new_vec->push_back((*entries_)[idx]);
 
     entries_.reset(new_vec);
+    dedup_alts_ = std::move(alts);
 }
 
 // ------------------------------------------------------------
@@ -171,4 +222,34 @@ void Cluster::load() {
         error_msg_ = ex.what();
         state_.store(LoadState::Error);
     }
+}
+
+// ------------------------------------------------------------
+//  get_node_raw — look up raw file position for a specific node
+// ------------------------------------------------------------
+bool Cluster::get_node_raw(size_t entry_idx, uint16_t node_idx,
+                            uint64_t& out_offset, uint32_t& out_len) const
+{
+    if (entry_idx >= entries_->size()) return false;
+    const LogEntry& e = (*entries_)[entry_idx];
+
+    // If the entry's own node matches, use its raw position directly
+    if (e.node_idx == node_idx) {
+        out_offset = e.raw_offset;
+        out_len    = e.raw_len;
+        return true;
+    }
+
+    // Check the dedup alts map
+    auto it = dedup_alts_.find(entry_idx);
+    if (it == dedup_alts_.end()) return false;
+
+    for (const auto& alt : it->second) {
+        if (alt.node_idx == node_idx) {
+            out_offset = alt.raw_offset;
+            out_len    = alt.raw_len;
+            return true;
+        }
+    }
+    return false;
 }

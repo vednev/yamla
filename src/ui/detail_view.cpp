@@ -192,11 +192,15 @@ static void render_element(const char* key,
 
 void DetailView::set_entry(const LogEntry* entry,
                             const std::string& file_path,
-                            const StringTable* strings)
+                            const StringTable* strings,
+                            uint64_t override_offset,
+                            uint32_t override_len)
 {
-    entry_     = entry;
-    file_path_ = file_path;
-    strings_   = strings;
+    entry_            = entry;
+    file_path_        = file_path;
+    strings_          = strings;
+    override_offset_  = override_offset;
+    override_len_     = override_len;
 }
 
 void DetailView::render_toolbar() {
@@ -213,9 +217,10 @@ void DetailView::render_inner() {
     }
 
     // Open the file, pread the log line, close immediately.
-    // This is the on-demand approach: no mmap is kept open between calls.
-    const uint64_t offset = entry_->raw_offset;
-    const size_t   rlen   = entry_->raw_len;
+    // For stacked entries, the caller may pass override offset/len
+    // to read a different node's version of the same log line.
+    const uint64_t offset = (override_len_ > 0) ? override_offset_ : entry_->raw_offset;
+    const size_t   rlen   = (override_len_ > 0) ? override_len_    : entry_->raw_len;
 
     // Read rlen + SIMDJSON_PADDING bytes into a local buffer
     std::vector<char> buf(rlen + simdjson::SIMDJSON_PADDING, '\0');

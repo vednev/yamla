@@ -6,6 +6,7 @@
 #include <atomic>
 #include <functional>
 #include <cstdint>
+#include <unordered_map>
 
 #include "../core/arena_chain.hpp"
 #include "../core/chunk_vector.hpp"
@@ -98,6 +99,13 @@ public:
     const AnalysisResult&        analysis() const { return analysis_; }
     const std::vector<NodeInfo>& nodes()    const { return nodes_; }
 
+    // For stacked (deduped) entries: get the raw file position for a
+    // specific node. Returns true if found; fills out_offset/out_len.
+    // If node_idx matches the entry's own node_idx, simply returns
+    // the entry's raw_offset/raw_len. Otherwise checks the dedup alts.
+    bool get_node_raw(size_t entry_idx, uint16_t node_idx,
+                      uint64_t& out_offset, uint32_t& out_len) const;
+
     // Infer hostname from first lines; fall back to filename stem.
     static std::string infer_hostname(const MmapFile& file,
                                       const std::string& path);
@@ -117,6 +125,18 @@ private:
     std::vector<std::string>  file_paths_;
     std::vector<NodeInfo>     nodes_;
     AnalysisResult            analysis_;
+
+    // Per-node raw positions for deduped/stacked entries.
+    // Key: final entry index in entries_.
+    // Value: vector of {node_idx, raw_offset, raw_len} for merged duplicates.
+    // The surviving entry's own raw_offset/raw_len is NOT stored here —
+    // it's still in the LogEntry itself.
+    struct DedupAlt {
+        uint16_t node_idx;
+        uint64_t raw_offset;
+        uint32_t raw_len;
+    };
+    std::unordered_map<size_t, std::vector<DedupAlt>> dedup_alts_;
 
     float                     sample_ratio_ = 1.0f;
 

@@ -116,6 +116,11 @@ void LogView::rebuild_filter_index() {
         if (entry_matches((*entries_)[i]))
             filtered_indices_.push_back(i);
     }
+    // Respect current sort direction: entries come out ascending
+    // from the ChunkVector, so reverse if user wants descending.
+    if (!sort_ascending_)
+        std::reverse(filtered_indices_.begin(), filtered_indices_.end());
+
     selected_row_ = -1;
 }
 
@@ -179,20 +184,43 @@ void LogView::render_inner() {
     ImGuiTableFlags table_flags =
         ImGuiTableFlags_RowBg        | ImGuiTableFlags_BordersOuter |
         ImGuiTableFlags_BordersV     | ImGuiTableFlags_ScrollY      |
-        ImGuiTableFlags_Resizable    | ImGuiTableFlags_SizingStretchProp;
+        ImGuiTableFlags_Resizable    | ImGuiTableFlags_SizingStretchProp |
+        ImGuiTableFlags_Sortable;
 
     ImVec2 avail = ImGui::GetContentRegionAvail();
     if (!ImGui::BeginTable("log_table", 6, table_flags, ImVec2(0, avail.y - 4)))
         return;
 
     ImGui::TableSetupScrollFreeze(0, 1);
-    ImGui::TableSetupColumn("Timestamp",  ImGuiTableColumnFlags_WidthStretch, 1.8f);
-    ImGui::TableSetupColumn("Sev",        ImGuiTableColumnFlags_WidthFixed,   38.0f);
-    ImGui::TableSetupColumn("Component",  ImGuiTableColumnFlags_WidthStretch, 1.0f);
-    ImGui::TableSetupColumn("Namespace",  ImGuiTableColumnFlags_WidthStretch, 1.2f);
-    ImGui::TableSetupColumn("Message",    ImGuiTableColumnFlags_WidthStretch, 3.0f);
-    ImGui::TableSetupColumn("Nodes",      ImGuiTableColumnFlags_WidthFixed,   70.0f);
+    ImGui::TableSetupColumn("Timestamp",
+        ImGuiTableColumnFlags_WidthStretch | ImGuiTableColumnFlags_DefaultSort |
+        ImGuiTableColumnFlags_PreferSortAscending, 1.8f);
+    ImGui::TableSetupColumn("Sev",
+        ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoSort, 38.0f);
+    ImGui::TableSetupColumn("Component",
+        ImGuiTableColumnFlags_WidthStretch | ImGuiTableColumnFlags_NoSort, 1.0f);
+    ImGui::TableSetupColumn("Namespace",
+        ImGuiTableColumnFlags_WidthStretch | ImGuiTableColumnFlags_NoSort, 1.2f);
+    ImGui::TableSetupColumn("Message",
+        ImGuiTableColumnFlags_WidthStretch | ImGuiTableColumnFlags_NoSort, 3.0f);
+    ImGui::TableSetupColumn("Nodes",
+        ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoSort, 70.0f);
     ImGui::TableHeadersRow();
+
+    // Handle sort direction changes on the Timestamp column
+    if (ImGuiTableSortSpecs* sort_specs = ImGui::TableGetSortSpecs()) {
+        if (sort_specs->SpecsDirty && sort_specs->SpecsCount > 0) {
+            bool new_ascending = (sort_specs->Specs[0].SortDirection ==
+                                  ImGuiSortDirection_Ascending);
+            if (new_ascending != sort_ascending_) {
+                sort_ascending_ = new_ascending;
+                // Reverse the filtered indices to flip the sort order
+                std::reverse(filtered_indices_.begin(), filtered_indices_.end());
+                selected_row_ = -1;  // clear selection — row indices changed
+            }
+            sort_specs->SpecsDirty = false;
+        }
+    }
 
     // ---- Virtual scroll via ImGuiListClipper ---------------
     ImGuiListClipper clipper;
@@ -221,6 +249,7 @@ void LogView::render_inner() {
             const ImVec4 row_text    = is_selected ? text_sel : text_normal;
 
             // ---- Col 0: Timestamp + spanning selectable ----
+            bool row_clicked = false;
             ImGui::TableSetColumnIndex(0);
             {
                 int64_t ts = e.timestamp_ms;
@@ -245,8 +274,9 @@ void LogView::render_inner() {
                 ImGui::PushStyleColor(ImGuiCol_Header,        pastel);
                 ImGui::PushStyleColor(ImGuiCol_HeaderHovered, pastel);
                 ImGui::PushStyleColor(ImGuiCol_HeaderActive,  pastel);
-                bool clicked = ImGui::Selectable("##row", is_selected,
-                                                 ImGuiSelectableFlags_SpanAllColumns,
+                row_clicked = ImGui::Selectable("##row", is_selected,
+                                                 ImGuiSelectableFlags_SpanAllColumns |
+                                                 ImGuiSelectableFlags_AllowOverlap,
                                                  ImVec2(0, 0));
                 ImGui::PopStyleColor(3);
                 ImGui::SameLine();
@@ -258,11 +288,6 @@ void LogView::render_inner() {
                 ImGui::PushStyleColor(ImGuiCol_Text, ts_col);
                 ImGui::TextUnformatted(ts_buf);
                 ImGui::PopStyleColor();
-
-                if (clicked) {
-                    selected_row_ = row;
-                    if (on_select_) on_select_(idx);
-                }
             }
 
             // ---- Col 1: Severity ----
@@ -304,18 +329,71 @@ void LogView::render_inner() {
                 ImGui::PopStyleColor();
             }
 
-            // ---- Col 5: Node badges ----
+            // ---- Col 5: Node badges (clickable for stacked entries) ----
             ImGui::TableSetColumnIndex(5);
+            bool node_badge_clicked = false;
             if (nodes_) {
-                for (size_t ni = 0; ni < nodes_->size() && ni < 16; ++ni) {
+                for (size_t ni = 0; ni < nodes_->size() && ni < 32; ++ni) {
                     if (!(e.node_mask & (1u << ni))) continue;
                     const NodeColor& c = (*nodes_)[ni].color;
-                    ImGui::ColorButton("##nb",
-                        ImVec4(c.r, c.g, c.b, c.a),
-                        ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoBorder,
-                        ImVec2(12, 12));
+
+                    // Highlight the currently selected node for this row
+                    bool is_active_node = is_selected &&
+                                          static_cast<uint16_t>(ni) == selected_node_;
+
+                    // Use a small button so it's clickable
+                    char btn_id[32];
+                    std::snprintf(btn_id, sizeof(btn_id), "##n%zu", ni);
+
+                    if (is_active_node) {
+                        // Draw with a bright border to indicate selection
+                        ImGui::PushStyleColor(ImGuiCol_Button,
+                            ImVec4(c.r, c.g, c.b, c.a));
+                        ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                            ImVec4(c.r, c.g, c.b, c.a));
+                        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.5f);
+                        ImGui::PushStyleColor(ImGuiCol_Border,
+                            ImVec4(1.0f, 1.0f, 1.0f, 0.9f));
+                    } else {
+                        ImGui::PushStyleColor(ImGuiCol_Button,
+                            ImVec4(c.r, c.g, c.b, 0.6f));
+                        ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                            ImVec4(c.r, c.g, c.b, 0.9f));
+                        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
+                        ImGui::PushStyleColor(ImGuiCol_Border,
+                            ImVec4(0, 0, 0, 0));
+                    }
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive,
+                        ImVec4(c.r, c.g, c.b, 1.0f));
+                    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 2.0f);
+                    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
+
+                    if (ImGui::Button(btn_id, ImVec2(12, 12))) {
+                        // Clicked a node badge — select this row + this node
+                        selected_row_ = row;
+                        selected_node_ = static_cast<uint16_t>(ni);
+                        if (on_select_) on_select_(idx, selected_node_);
+                        node_badge_clicked = true;
+                    }
+
+                    ImGui::PopStyleVar(3);   // FramePadding, FrameRounding, FrameBorderSize
+                    ImGui::PopStyleColor(4); // Button, ButtonHovered, Border, ButtonActive
+
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::BeginTooltip();
+                        ImGui::TextUnformatted((*nodes_)[ni].hostname.c_str());
+                        ImGui::EndTooltip();
+                    }
+
                     ImGui::SameLine(0, 2);
                 }
+            }
+
+            // Process row click (deferred so node badge clicks take priority)
+            if (row_clicked && !node_badge_clicked) {
+                selected_row_ = row;
+                selected_node_ = leftmost_node(e.node_mask);
+                if (on_select_) on_select_(idx, selected_node_);
             }
 
             ImGui::PopID();
@@ -328,6 +406,13 @@ void LogView::render_inner() {
 // ------------------------------------------------------------
 //  render — standalone window wrapper
 // ------------------------------------------------------------
+uint16_t LogView::leftmost_node(uint32_t mask) {
+    if (mask == 0) return 0;
+    for (uint16_t i = 0; i < 32; ++i)
+        if (mask & (1u << i)) return i;
+    return 0;
+}
+
 void LogView::render() {
     ImGui::Begin("Log View");
     render_inner();

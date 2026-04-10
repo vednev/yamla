@@ -12,13 +12,16 @@ IMGUI_BIND := $(IMGUI_PKG)/res/bindings
 
 # Conan for imgui, implot, simdjson
 # SDL2 from Homebrew (system-native, avoids macOS malloc crash from Conan build)
+# OpenSSL from Homebrew (needed by cpp-httplib for HTTPS)
 CONAN_CFLAGS := $(shell PKG_CONFIG_PATH=$(CONAN_PC) pkg-config --cflags imgui implot simdjson 2>/dev/null)
 CONAN_LIBS   := $(shell PKG_CONFIG_PATH=$(CONAN_PC) pkg-config --libs   imgui implot simdjson 2>/dev/null)
 SDL2_CFLAGS  := $(shell pkg-config --cflags sdl2 2>/dev/null)
 SDL2_LIBS    := $(shell pkg-config --libs   sdl2 2>/dev/null)
+SSL_CFLAGS   := $(shell pkg-config --cflags openssl 2>/dev/null)
+SSL_LIBS     := $(shell pkg-config --libs   openssl 2>/dev/null)
 
-PKG_CFLAGS := $(CONAN_CFLAGS) $(SDL2_CFLAGS)
-PKG_LIBS   := $(CONAN_LIBS)   $(SDL2_LIBS)
+PKG_CFLAGS := $(CONAN_CFLAGS) $(SDL2_CFLAGS) $(SSL_CFLAGS)
+PKG_LIBS   := $(CONAN_LIBS)   $(SDL2_LIBS)   $(SSL_LIBS)
 
 # ---- Platform detection ------------------------------------
 UNAME := $(shell uname)
@@ -59,7 +62,12 @@ MARCH := $(if $(CI),,-march=native)
 CXXFLAGS := -std=c++17 -O3 $(MARCH) -Wall -Wextra -Wno-unused-parameter \
             -Isrc \
             -I$(IMGUI_BIND) \
+            -Ivendor/httplib \
+            -Ivendor/md4c \
             $(PKG_CFLAGS) $(PLATFORM_CFLAGS)
+
+# C flags for md4c (compiled as C, not C++)
+CFLAGS := -O3 $(MARCH) -Wall -Ivendor/md4c
 
 LDFLAGS := $(PKG_LIBS) $(PLATFORM_LIBS)
 
@@ -71,7 +79,11 @@ SRCDIR   := src
 SRCS := $(shell find $(SRCDIR) -name '*.cpp')
 OBJS := $(patsubst $(SRCDIR)/%.cpp, $(BUILDDIR)/%.o, $(SRCS))
 
-ALL_OBJS := $(OBJS) $(BACKEND_OBJS)
+# Vendor C sources (md4c)
+VENDOR_C_SRCS := vendor/md4c/md4c.c
+VENDOR_C_OBJS := $(BUILDDIR)/vendor/md4c.o
+
+ALL_OBJS := $(OBJS) $(BACKEND_OBJS) $(VENDOR_C_OBJS)
 
 # ---- Targets -----------------------------------------------
 
@@ -100,6 +112,11 @@ $(BUILDDIR)/%.o: $(SRCDIR)/%.cpp
 $(BUILDDIR)/backends/%.o: $(IMGUI_BIND)/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+# Rule for vendor C sources (md4c)
+$(BUILDDIR)/vendor/md4c.o: vendor/md4c/md4c.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
 	rm -rf $(BUILDDIR) $(TARGET)
