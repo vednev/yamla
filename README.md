@@ -1,7 +1,7 @@
 # YAMLA
 
 Yet Another MongoDB Log Analyzer. Fast, and intended for
-inspecting and filtering MongoDB 5.4+ structured JSON logs with a built-in chat + AI agent to analyze them. 
+inspecting and filtering MongoDB 5.4+ structured JSON logs with a built-in chat + AI agent to analyze them. It is heavily vibe coded. Proceed with caution!
 
 > **Supported log type:** `mongod` server logs only.
 > YAMLA does not currently support MongoDB Agent logs, Ops Manager logs,
