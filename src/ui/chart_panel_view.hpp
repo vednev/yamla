@@ -18,15 +18,27 @@ class StringTable;
 struct NodeInfo;
 
 // ------------------------------------------------------------
-//  ChartState — per-metric chart render configuration
-//  Buttons removed: show_rate and log_scale are auto-computed,
-//  not user-toggled.  Cumulative metrics always show rate.
-//  Log scale engages automatically when value range spans >3
-//  orders of magnitude.
+//  UnitDisplayConfig — per-unit-type Y-axis display strategy.
+//  Follows Grafana/PMM conventions for MongoDB metric display.
+// ------------------------------------------------------------
+struct UnitDisplayConfig {
+    bool   anchor_at_zero;     // true = Y min is 0 for non-negative data
+    double y_pad_fraction;     // padding above max (and below min if floating)
+    bool   auto_log_eligible;  // true = auto-engage log scale if range >1000x
+    double hard_y_max;         // NaN = auto, 100.0 for percentages
+};
+
+// Lookup the display config for a given unit string.
+UnitDisplayConfig unit_display_config(const std::string& unit);
+
+// ------------------------------------------------------------
+//  ChartState — per-metric chart render configuration.
+//  show_rate and log_scale are auto-computed from data, not
+//  user-toggled.  Cumulative metrics always show rate.
 // ------------------------------------------------------------
 struct ChartState {
     bool show_rate  = true;   // always true for cumulative metrics
-    bool log_scale  = false;  // auto-computed from value range
+    bool log_scale  = false;  // auto-computed from value range + unit
     bool initialized = false; // set once after first data scan
 };
 

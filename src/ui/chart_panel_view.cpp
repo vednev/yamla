@@ -28,64 +28,171 @@ static int64_t plot_to_ms(double x) {
 }
 
 // ============================================================
-//  Y-axis tick formatter callback for ImPlot::SetupAxisFormat.
-//  user_data points to a C string (the unit).
+//  unit_display_config — per-unit Y-axis display strategy.
+//  Follows Grafana/PMM conventions for MongoDB metrics.
 // ============================================================
-static int y_axis_formatter(double value, char* buf, int size, void* user_data) {
-    const char* unit = static_cast<const char*>(user_data);
-    if (!unit) unit = "";
+UnitDisplayConfig unit_display_config(const std::string& unit) {
+    // defaults: anchor at zero, 10% padding, no log, no hard max
+    constexpr double NaN = std::numeric_limits<double>::quiet_NaN();
 
-    // Handle negative values: format absolute value and prepend '-'
-    if (value < 0.0) {
-        char tmp[48];
-        y_axis_formatter(-value, tmp, sizeof(tmp), user_data);
-        return std::snprintf(buf, static_cast<size_t>(size), "-%s", tmp);
-    }
+    // Byte sizes (absolute)
+    if (unit == "bytes")   return { true, 0.10, false, NaN };
+    if (unit == "bytes/s") return { true, 0.10, false, NaN };
+    if (unit == "KB")      return { true, 0.10, false, NaN };
+    if (unit == "MB")      return { true, 0.10, false, NaN };
 
-    std::string u(unit);
-    if (u == "bytes" || u == "bytes/s") {
-        if (value >= 1024.0 * 1024.0 * 1024.0)
-            return std::snprintf(buf, static_cast<size_t>(size), "%.1f GB", value / (1024.0*1024.0*1024.0));
-        if (value >= 1024.0 * 1024.0)
-            return std::snprintf(buf, static_cast<size_t>(size), "%.1f MB", value / (1024.0*1024.0));
-        if (value >= 1024.0)
-            return std::snprintf(buf, static_cast<size_t>(size), "%.1f KB", value / 1024.0);
-        return std::snprintf(buf, static_cast<size_t>(size), "%.0f B", value);
-    }
-    if (value >= 1000000.0)
-        return std::snprintf(buf, static_cast<size_t>(size), "%.1fM", value / 1000000.0);
-    if (value >= 1000.0)
-        return std::snprintf(buf, static_cast<size_t>(size), "%.1fK", value / 1000.0);
-    if (value == 0.0)
-        return std::snprintf(buf, static_cast<size_t>(size), "0");
-    if (value < 1.0)
-        return std::snprintf(buf, static_cast<size_t>(size), "%.2f", value);
-    return std::snprintf(buf, static_cast<size_t>(size), "%.1f", value);
+    // Durations — slightly more padding for threshold bands
+    if (unit == "ms")      return { true, 0.15, true,  NaN };
+    if (unit == "s")       return { false, 0.05, false, NaN }; // uptime floats
+
+    // Latency — long-tailed, log-eligible
+    if (unit == "us")      return { true, 0.10, true,  NaN };
+
+    // Time-rates (CPU time, sync duration per second)
+    if (unit == "ms/s")    return { true, 0.10, true,  NaN };
+    if (unit == "us/s")    return { true, 0.10, true,  NaN };
+
+    // Percentage
+    if (unit == "%")       return { true, 0.05, false, 100.0 };
+
+    // Gauge counts (connections, tickets, queue depths, dhandles, sessions)
+    if (unit == "count")   return { true, 0.10, false, NaN };
+
+    // All throughput rates: ops/s, docs/s, txns/s, pages/s, conns/s,
+    // req/s, count/s, conflicts/s, records/s, sectors/s
+    // — anchor at zero, eligible for log if wide range
+    return { true, 0.10, true, NaN };
 }
 
 // ============================================================
-//  fmt_metric_value
+//  format_value_with_unit — shared formatting core.
+//  Writes a human-readable representation of `value` with the
+//  given unit into `buf`.  Used by both the ImPlot Y-axis
+//  formatter callback and the tooltip/stats formatter.
+//
+//  `decimals`: 1 for axis ticks (compact), 2 for tooltips (precise).
+// ============================================================
+static int format_value_with_unit(double value, char* buf, int size,
+                                  const char* unit, int decimals)
+{
+    size_t sz = static_cast<size_t>(size);
+    if (value < 0.0) {
+        char tmp[64];
+        format_value_with_unit(-value, tmp, sizeof(tmp), unit, decimals);
+        return std::snprintf(buf, sz, "-%s", tmp);
+    }
+    if (value == 0.0)
+        return std::snprintf(buf, sz, "0");
+
+    std::string u(unit ? unit : "");
+
+    // ---- IEC byte sizes ----
+    if (u == "bytes" || u == "bytes/s") {
+        const char* sfx = (u == "bytes/s") ? "/s" : "";
+        if (value >= 1024.0 * 1024.0 * 1024.0)
+            return std::snprintf(buf, sz, "%.*f GB%s", decimals, value / (1024.0*1024.0*1024.0), sfx);
+        if (value >= 1024.0 * 1024.0)
+            return std::snprintf(buf, sz, "%.*f MB%s", decimals, value / (1024.0*1024.0), sfx);
+        if (value >= 1024.0)
+            return std::snprintf(buf, sz, "%.*f KB%s", decimals, value / 1024.0, sfx);
+        return std::snprintf(buf, sz, "%.0f B%s", value, sfx);
+    }
+
+    // ---- KB → MB → GB ----
+    if (u == "KB") {
+        if (value >= 1048576.0)
+            return std::snprintf(buf, sz, "%.*f GB", decimals, value / 1048576.0);
+        if (value >= 1024.0)
+            return std::snprintf(buf, sz, "%.*f MB", decimals, value / 1024.0);
+        return std::snprintf(buf, sz, "%.0f KB", value);
+    }
+    // ---- MB → GB ----
+    if (u == "MB") {
+        if (value >= 1024.0)
+            return std::snprintf(buf, sz, "%.*f GB", decimals, value / 1024.0);
+        return std::snprintf(buf, sz, "%.*f MB", decimals, value);
+    }
+
+    // ---- Milliseconds (duration): ms → s → min ----
+    if (u == "ms") {
+        if (value >= 60000.0)
+            return std::snprintf(buf, sz, "%.*f min", decimals, value / 60000.0);
+        if (value >= 1000.0)
+            return std::snprintf(buf, sz, "%.*f s", decimals, value / 1000.0);
+        return std::snprintf(buf, sz, "%.*f ms", decimals, value);
+    }
+
+    // ---- Microseconds (latency): us → ms → s ----
+    if (u == "us") {
+        if (value >= 1000000.0)
+            return std::snprintf(buf, sz, "%.*f s", decimals, value / 1000000.0);
+        if (value >= 1000.0)
+            return std::snprintf(buf, sz, "%.*f ms", decimals, value / 1000.0);
+        return std::snprintf(buf, sz, "%.0f us", value);
+    }
+
+    // ---- Seconds (uptime): s → min → hr → d ----
+    if (u == "s") {
+        if (value >= 86400.0)
+            return std::snprintf(buf, sz, "%.*f d", decimals, value / 86400.0);
+        if (value >= 3600.0)
+            return std::snprintf(buf, sz, "%.*f hr", decimals, value / 3600.0);
+        if (value >= 60.0)
+            return std::snprintf(buf, sz, "%.*f min", decimals, value / 60.0);
+        return std::snprintf(buf, sz, "%.*f s", decimals, value);
+    }
+
+    // ---- Time-rates: ms/s and us/s ----
+    if (u == "ms/s") {
+        if (value >= 60000.0)
+            return std::snprintf(buf, sz, "%.*f min/s", decimals, value / 60000.0);
+        if (value >= 1000.0)
+            return std::snprintf(buf, sz, "%.*f s/s", decimals, value / 1000.0);
+        return std::snprintf(buf, sz, "%.*f ms/s", decimals, value);
+    }
+    if (u == "us/s") {
+        if (value >= 1000000.0)
+            return std::snprintf(buf, sz, "%.*f s/s", decimals, value / 1000000.0);
+        if (value >= 1000.0)
+            return std::snprintf(buf, sz, "%.*f ms/s", decimals, value / 1000.0);
+        return std::snprintf(buf, sz, "%.0f us/s", value);
+    }
+
+    // ---- Percentage ----
+    if (u == "%")
+        return std::snprintf(buf, sz, "%.*f%%", decimals, value);
+
+    // ---- Generic SI suffixes for everything else (ops/s, count, etc.) ----
+    if (value >= 1000000.0)
+        return std::snprintf(buf, sz, "%.*fM", decimals, value / 1000000.0);
+    if (value >= 1000.0)
+        return std::snprintf(buf, sz, "%.*fK", decimals, value / 1000.0);
+    if (value < 1.0)
+        return std::snprintf(buf, sz, "%.2f", value);
+    // Integer-like values: avoid ".0" for clean tick labels
+    if (value == std::floor(value) && value < 10000.0)
+        return std::snprintf(buf, sz, "%.0f", value);
+    return std::snprintf(buf, sz, "%.*f", decimals, value);
+}
+
+// ============================================================
+//  ImPlot Y-axis formatter callback.
+//  user_data points to a C string (the unit).
+// ============================================================
+static int y_axis_formatter(double value, char* buf, int size, void* user_data) {
+    return format_value_with_unit(value, buf, size,
+                                  static_cast<const char*>(user_data), 1);
+}
+
+// ============================================================
+//  fmt_metric_value — public formatting for tooltips and stats.
+//  Uses 2 decimal places for precision.
 // ============================================================
 void ChartPanelView::fmt_metric_value(char* buf, size_t bufsz,
                                        double value, const std::string& unit)
 {
-    if (unit == "bytes" || unit == "bytes/s") {
-        const char* suffix = unit == "bytes/s" ? "/s" : "";
-        if (value >= 1024.0 * 1024.0 * 1024.0)
-            std::snprintf(buf, bufsz, "%.2f GB%s", value / (1024.0*1024.0*1024.0), suffix);
-        else if (value >= 1024.0 * 1024.0)
-            std::snprintf(buf, bufsz, "%.2f MB%s", value / (1024.0*1024.0), suffix);
-        else if (value >= 1024.0)
-            std::snprintf(buf, bufsz, "%.1f KB%s", value / 1024.0, suffix);
-        else
-            std::snprintf(buf, bufsz, "%.0f B%s", value, suffix);
-    } else if (value >= 1000000.0) {
-        std::snprintf(buf, bufsz, "%.2fM %s", value / 1000000.0, unit.c_str());
-    } else if (value >= 1000.0) {
-        std::snprintf(buf, bufsz, "%.1fK %s", value / 1000.0, unit.c_str());
-    } else {
-        std::snprintf(buf, bufsz, "%.1f %s", value, unit.c_str());
-    }
+    format_value_with_unit(value, static_cast<char*>(buf),
+                           static_cast<int>(bufsz), unit.c_str(), 2);
 }
 
 // ============================================================
@@ -304,10 +411,13 @@ void ChartPanelView::render_chart(const MetricSeries& series,
         }
     }
 
-    // ---- Compute Y-axis min/max from visible data with padding ----
+    // ---- Compute Y-axis min/max from FULL data (not downsampled) ----
+    // Using the original values array ensures we don't miss true extremes
+    // that LTTB may have dropped.
     double y_data_min =  std::numeric_limits<double>::max();
     double y_data_max = -std::numeric_limits<double>::max();
-    for (double v : plot_y) {
+    for (size_t i = 0; i < n; ++i) {
+        double v = values[i];
         if (v < y_data_min) y_data_min = v;
         if (v > y_data_max) y_data_max = v;
     }
@@ -316,43 +426,64 @@ void ChartPanelView::render_chart(const MetricSeries& series,
         y_data_max = 1.0;
     }
 
-    // Auto-detect log scale: engage when value range spans >3 orders of
-    // magnitude (max/min > 1000) and all values are positive.
+    // Look up unit-aware display config
+    UnitDisplayConfig ucfg = unit_display_config(series.unit);
+
+    // Auto-detect log scale (once per metric, on first data scan)
     if (!state.initialized) {
         state.show_rate = use_rate;
-        double pos_min = std::numeric_limits<double>::max();
-        double pos_max = 0.0;
-        for (double v : values) {
-            if (v > 0.0) {
-                if (v < pos_min) pos_min = v;
-                if (v > pos_max) pos_max = v;
+        state.log_scale = false;
+        if (ucfg.auto_log_eligible) {
+            double pos_min = std::numeric_limits<double>::max();
+            double pos_max = 0.0;
+            for (size_t i = 0; i < n; ++i) {
+                double v = values[i];
+                if (v > 0.0) {
+                    if (v < pos_min) pos_min = v;
+                    if (v > pos_max) pos_max = v;
+                }
             }
+            state.log_scale = (pos_min > 0.0 && pos_max > 0.0
+                               && pos_max / pos_min > 1000.0);
         }
-        state.log_scale = (pos_min > 0.0 && pos_max > 0.0
-                           && pos_max / pos_min > 1000.0
-                           && y_data_min >= 0.0);
         state.initialized = true;
     }
 
-    // Compute padded Y limits (10% padding above and below)
+    // ---- Compute padded Y limits using unit-aware strategy ----
     double y_range = y_data_max - y_data_min;
-    double y_pad   = (y_range > 0.0) ? y_range * 0.10 : 1.0;
-    double y_lo    = y_data_min - y_pad;
-    double y_hi    = y_data_max + y_pad;
+    double y_pad   = (y_range > 0.0) ? y_range * ucfg.y_pad_fraction : 1.0;
+    double y_lo, y_hi;
 
-    // For rate/count metrics that can't go negative, clamp floor to 0
-    // (but allow a tiny negative for visual grounding when min is near 0)
-    if (use_rate || y_data_min >= 0.0) {
-        if (y_data_min >= 0.0 && y_data_min < y_range * 0.3) {
-            // Data baseline is near 0 — anchor at 0
-            y_lo = -y_pad * 0.1; // slight negative for visual grounding
-        }
-        // Don't go below 0 for rate metrics if min is well above 0
-        if (use_rate && y_lo < 0.0 && y_data_min > 0.0)
+    // Constant data: show a meaningful range around the value
+    if (y_range == 0.0) {
+        double val = y_data_min;
+        if (val == 0.0) {
             y_lo = 0.0;
+            y_hi = 1.0;
+        } else {
+            double spread = std::abs(val) * 0.10;
+            y_lo = val - spread;
+            y_hi = val + spread;
+        }
+    } else if (ucfg.anchor_at_zero && y_data_min >= 0.0) {
+        // Anchor at zero: Y starts at 0, pad above max
+        y_lo = 0.0;
+        y_hi = y_data_max + y_pad;
+    } else {
+        // Floating axis: pad both sides
+        y_lo = y_data_min - y_pad;
+        y_hi = y_data_max + y_pad;
     }
 
-    // For log scale, ensure positive limits
+    // Apply hard Y max (e.g., 100 for percentages)
+    if (!std::isnan(ucfg.hard_y_max) && y_hi > ucfg.hard_y_max)
+        y_hi = ucfg.hard_y_max;
+
+    // For non-negative units, never show negative Y values
+    if (ucfg.anchor_at_zero && y_lo < 0.0)
+        y_lo = 0.0;
+
+    // For log scale, ensure strictly positive limits
     if (state.log_scale) {
         if (y_lo <= 0.0) y_lo = (y_data_min > 0.0) ? y_data_min * 0.5 : 0.1;
         if (y_hi <= y_lo) y_hi = y_lo * 10.0;
@@ -384,9 +515,14 @@ void ChartPanelView::render_chart(const MetricSeries& series,
             ImPlotAxisFlags_NoDecorations | ImPlotAxisFlags_NoHighlight);
         ImPlot::SetupAxisLimits(ImAxis_X1, x_view_min_, x_view_max_, ImGuiCond_Always);
 
-        // Y axis — explicit padded limits, custom tick formatter
+        // Y axis — unit-aware padded limits, custom tick formatter.
+        // ImGuiCond_Always to keep limits stable while scrolling
+        // through multiple charts. SetupAxisLimitsConstraints prevents
+        // nonsensical zoom/pan ranges for non-negative metrics.
         ImPlot::SetupAxis(ImAxis_Y1, nullptr, ImPlotAxisFlags_NoLabel);
         ImPlot::SetupAxisLimits(ImAxis_Y1, y_lo, y_hi, ImGuiCond_Always);
+        if (ucfg.anchor_at_zero)
+            ImPlot::SetupAxisLimitsConstraints(ImAxis_Y1, 0.0, INFINITY);
         ImPlot::SetupAxisFormat(ImAxis_Y1, y_axis_formatter,
                                 const_cast<char*>(series.unit.c_str()));
         if (state.log_scale)
