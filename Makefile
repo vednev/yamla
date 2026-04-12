@@ -19,9 +19,16 @@ SDL2_CFLAGS  := $(shell pkg-config --cflags sdl2 2>/dev/null)
 SDL2_LIBS    := $(shell pkg-config --libs   sdl2 2>/dev/null)
 SSL_CFLAGS   := $(shell pkg-config --cflags openssl 2>/dev/null)
 SSL_LIBS     := $(shell pkg-config --libs   openssl 2>/dev/null)
+ZLIB_CFLAGS  := $(shell pkg-config --cflags zlib 2>/dev/null)
+ZLIB_LIBS    := $(shell pkg-config --libs   zlib 2>/dev/null)
 
-PKG_CFLAGS := $(CONAN_CFLAGS) $(SDL2_CFLAGS) $(SSL_CFLAGS)
-PKG_LIBS   := $(CONAN_LIBS)   $(SDL2_LIBS)   $(SSL_LIBS)
+# Fallback: if pkg-config can't find zlib, use system -lz directly
+ifeq ($(ZLIB_LIBS),)
+  ZLIB_LIBS := -lz
+endif
+
+PKG_CFLAGS := $(CONAN_CFLAGS) $(SDL2_CFLAGS) $(SSL_CFLAGS) $(ZLIB_CFLAGS)
+PKG_LIBS   := $(CONAN_LIBS)   $(SDL2_LIBS)   $(SSL_LIBS)   $(ZLIB_LIBS)
 
 # ---- Platform detection ------------------------------------
 UNAME := $(shell uname)
@@ -159,7 +166,7 @@ TEST_DEP_SRCS := $(filter-out src/main.cpp, $(filter-out src/ui/%, $(filter-out 
 TEST_DEP_OBJS := $(patsubst $(SRCDIR)/%.cpp, $(BUILDDIR)/%.o, $(TEST_DEP_SRCS))
 
 TEST_CXXFLAGS := $(CXXFLAGS) $(CATCH2_CFLAGS)
-TEST_LDFLAGS  := $(CATCH2_LIBS) $(CONAN_LIBS) $(SSL_LIBS)
+TEST_LDFLAGS  := $(CATCH2_LIBS) $(CONAN_LIBS) $(SSL_LIBS) $(ZLIB_LIBS)
 
 test: $(TEST_OBJS) $(TEST_DEP_OBJS)
 	$(CXX) $(TEST_CXXFLAGS) -o build/run_tests $^ $(TEST_LDFLAGS)
