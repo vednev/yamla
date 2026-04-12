@@ -43,6 +43,11 @@ struct FilterState {
     std::unordered_set<uint32_t>  driver_idx_include; // StringTable indices
     std::unordered_set<uint16_t>  node_idx_include;   // node indices (NodeInfo::idx)
 
+    // Time-window filter set by FTDC cross-link (epoch ms, 0 = inactive)
+    bool    time_window_active   = false;
+    int64_t time_window_start_ms = 0;
+    int64_t time_window_end_ms   = 0;
+
     bool active() const {
         return !text_search.empty()              ||
                severity_filter != 0             ||
@@ -54,7 +59,8 @@ struct FilterState {
                slow_query_only                  ||
                !conn_id_include.empty()         ||
                !driver_idx_include.empty()      ||
-               !node_idx_include.empty();
+               !node_idx_include.empty()        ||
+               time_window_active;
     }
 
     void clear() { *this = FilterState{}; }

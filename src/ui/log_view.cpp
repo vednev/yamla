@@ -101,6 +101,13 @@ bool LogView::entry_matches(const LogEntry& e) const {
         if (!found) return false;
     }
 
+    // Time-window filter (set by FTDC cross-link)
+    if (filter_->time_window_active) {
+        if (e.timestamp_ms < filter_->time_window_start_ms ||
+            e.timestamp_ms > filter_->time_window_end_ms)
+            return false;
+    }
+
     return true;
 }
 
