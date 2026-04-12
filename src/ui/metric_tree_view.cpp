@@ -218,7 +218,7 @@ void MetricTreeView::render_dashboard_cards() {
         if (has_anomaly) {
             dl->AddCircleFilled(ImVec2(badge_cx, badge_cy), badge_r,
                 ImGui::GetColorU32(COL_BADGE_RED));
-        } else if (active) {
+        } else {
             dl->AddCircleFilled(ImVec2(badge_cx, badge_cy), badge_r,
                 ImGui::GetColorU32(COL_BADGE_GREEN));
         }
