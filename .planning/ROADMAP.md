@@ -29,13 +29,13 @@ Plans:
 
 ## Milestone 2: FTDC Analytics
 
-### Phase 3: FTDC Support
+### Phase 3: FTDC Support — COMPLETE
 
 **Goal:** Parse and visualize MongoDB FTDC binary metric files (`diagnostic.data/metrics.*`). Provide time-series charts with preset dashboards, searchable metric tree, LTTB downsampling, synchronized crosshairs, anomaly thresholds, log event annotation markers, and bidirectional time-range linking with the log view. Single-node only.
 
 **Context:** `.planning/phases/03-ftdc-support/03-CONTEXT.md`
 
-**Plans:** 4 plans
+**Result:** 178 tests, 116,272 assertions. All FTDC subsystem files extracted, integrated, and tested.
 
 Plans:
 - [x] 03-01-PLAN.md — Extract FTDC core + UI source files from wip-ftdc branch
@@ -43,7 +43,22 @@ Plans:
 - [x] 03-03-PLAN.md — App integration: tab bar, drop detection, cross-view linking
 - [x] 03-04-PLAN.md — Build system (zlib), CI update, full build + test verification
 
+### Phase 3b: FTDC View UX Overhaul
+
+**Goal:** Redesign the FTDC view UX: dashboard-first navigation with 12-15 curated category cards (toggle on/off), anomaly status badges, collapsible chart groups in the right panel, and a search overlay replacing the verbose raw metric tree. Based on `knowledge/ftdc_knowledge.md` domain expertise and external tool research.
+
+**Context:** `.planning/phases/03-ftdc-support/03b-CONTEXT.md`
+
+**Requirements:** [D-12, D-13, D-14, D-15, D-16, D-17, D-18, D-19, D-20, D-21, D-22, D-23, D-24]
+
+**Plans:** 3 plans
+
+Plans:
+- [ ] 03-05-PLAN.md — Expand metric_defs.hpp: 15 dashboards, ~50 new metrics, 8 new thresholds, disk I/O pattern helper
+- [ ] 03-06-PLAN.md — Rewrite MetricTreeView: dashboard cards, anomaly badges, search overlay
+- [ ] 03-07-PLAN.md — ChartPanelView category grouping + FtdcView wiring + full test verification
+
 ---
 
 *Roadmap created: 2026-04-12*
-*Updated: 2026-04-12 — Phases 1 & 2 marked complete, Phase 3 planned (4 plans, 3 waves)*
+*Updated: 2026-04-12 — Phase 3b planned (3 plans in 2 waves)*
