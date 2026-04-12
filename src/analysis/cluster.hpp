@@ -87,6 +87,12 @@ public:
     // Synchronous load — call from background thread.
     void load();
 
+    // Append new files to an already-loaded cluster.
+    // Parses only the new files, merges entries with existing data,
+    // re-sorts by timestamp, re-deduplicates, and re-analyzes.
+    // Synchronous — call from background thread.
+    void append_files(const std::vector<std::string>& new_paths);
+
     // ---- State -------------------------------------------------
     LoadState          state()    const { return state_.load(); }
     float              progress() const { return progress_.load(); }

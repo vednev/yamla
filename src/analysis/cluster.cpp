@@ -4,12 +4,17 @@
 #include <simdjson.h>
 #include <algorithm>
 #include <stdexcept>
+#include <cstdio>
 #include <cstring>
 
 // ------------------------------------------------------------
 //  add_file
 // ------------------------------------------------------------
 void Cluster::add_file(const std::string& path) {
+    if (file_paths_.size() >= 32) {
+        std::fprintf(stderr, "Warning: max 32 nodes supported, ignoring %s\n", path.c_str());
+        return;
+    }
     file_paths_.push_back(path);
 }
 
@@ -211,6 +216,95 @@ void Cluster::load() {
         }
 
         sort_entries_by_time();
+        scratch_chain_.reset();  // free merge-sort scratch memory
+        dedup_entries();
+
+        analysis_ = Analyzer::analyze(*entries_, *strings_);
+
+        progress_.store(1.0f);
+        state_.store(LoadState::Ready);
+
+    } catch (const std::exception& ex) {
+        error_msg_ = ex.what();
+        state_.store(LoadState::Error);
+    }
+}
+
+// ------------------------------------------------------------
+//  append_files — add new files to an existing cluster
+// ------------------------------------------------------------
+void Cluster::append_files(const std::vector<std::string>& new_paths) {
+    if (new_paths.empty()) return;
+
+    state_.store(LoadState::Loading);
+    progress_.store(0.0f);
+
+    try {
+        // Determine new node indices starting after existing nodes
+        uint16_t old_node_count = static_cast<uint16_t>(nodes_.size());
+        uint16_t new_count      = static_cast<uint16_t>(new_paths.size());
+        uint16_t total_nodes    = old_node_count + new_count;
+
+        // Add NodeInfo entries for the new files
+        nodes_.resize(total_nodes);
+        for (uint16_t i = 0; i < new_count; ++i) {
+            uint16_t ni = old_node_count + i;
+            nodes_[ni].idx   = ni;
+            nodes_[ni].path  = new_paths[i];
+            nodes_[ni].color = pastel_color(ni, total_nodes);
+        }
+
+        // Reassign colours for existing nodes so they're evenly spaced
+        // across the new total count
+        for (uint16_t i = 0; i < old_node_count; ++i)
+            nodes_[i].color = pastel_color(i, total_nodes);
+
+        // Also track new paths in file_paths_
+        for (const auto& p : new_paths)
+            file_paths_.push_back(p);
+
+        // Before re-sorting, we need to un-dedup: the current entries_
+        // is already deduped. We can't undo that, but we don't need to —
+        // new entries will merge in during dedup. We just need to rebuild
+        // entries_ from scratch to include the new data.
+        //
+        // However, rebuilding from scratch means re-parsing ALL files.
+        // That's expensive. Instead, we:
+        //   1. Clear the dedup_alts_ (will be rebuilt)
+        //   2. Parse only the new files, appending to entries_
+        //   3. Re-sort the entire entries_ vector
+        //   4. Re-dedup (will re-stack across old and new nodes)
+        //   5. Re-analyze
+
+        dedup_alts_.clear();
+
+        // Parse the new files
+        LogParser::Config cfg;
+        cfg.num_threads  = 0;
+        cfg.sample_ratio = sample_ratio_;
+        LogParser parser(*strings_, cfg);
+
+        float file_weight = 1.0f / static_cast<float>(new_count);
+
+        for (uint16_t i = 0; i < new_count; ++i) {
+            uint16_t ni = old_node_count + i;
+            {
+                MmapFile file(new_paths[i]);
+                nodes_[ni].hostname = infer_hostname(file, new_paths[i]);
+
+                float base = static_cast<float>(i) * file_weight;
+                parser.parse_file(file, ni, *entries_,
+                    [&, base, file_weight](size_t done, size_t total) {
+                        float frac = (total > 0)
+                                     ? static_cast<float>(done) / static_cast<float>(total)
+                                     : 1.0f;
+                        progress_.store(base + frac * file_weight);
+                    });
+            }
+        }
+
+        sort_entries_by_time();
+        scratch_chain_.reset();  // free merge-sort scratch memory
         dedup_entries();
 
         analysis_ = Analyzer::analyze(*entries_, *strings_);

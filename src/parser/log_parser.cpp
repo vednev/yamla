@@ -230,7 +230,7 @@ ParseResult LogParser::parse_batch(const ParseBatch& batch) {
         SVS      sv{};
 
         e.node_idx   = batch.node_idx;
-        e.node_mask  = 1u << batch.node_idx;
+        e.node_mask  = (batch.node_idx < 32) ? (1u << batch.node_idx) : 0u;
         e.raw_offset = static_cast<uint64_t>(batch.file_base + it.current_index());
 
         // timestamp
