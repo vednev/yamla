@@ -36,3 +36,18 @@ imgui.ini
 vendor/imgui/
 vendor/implot/
 # vendor/fonts/ is committed — do NOT ignore it
+
+# Planning / internal tooling state
+.planning/
+.opencode/
+
+# Test temp files
+/tmp/yamla_test_*
+
+# macOS
+.DS_Store
+Thumbs.db
+
+# Secrets (should never be committed)
+*.pem
+*.key
