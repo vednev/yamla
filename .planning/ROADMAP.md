@@ -54,7 +54,7 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 03-05-PLAN.md — Expand metric_defs.hpp: 15 dashboards, ~50 new metrics, 8 new thresholds, disk I/O pattern helper
+- [x] 03-05-PLAN.md — Expand metric_defs.hpp: 15 dashboards, ~50 new metrics, 8 new thresholds, disk I/O pattern helper
 - [ ] 03-06-PLAN.md — Rewrite MetricTreeView: dashboard cards, anomaly badges, search overlay
 - [ ] 03-07-PLAN.md — ChartPanelView category grouping + FtdcView wiring + full test verification
 
