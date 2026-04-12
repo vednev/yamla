@@ -28,6 +28,42 @@ static int64_t plot_to_ms(double x) {
 }
 
 // ============================================================
+//  Y-axis tick formatter callback for ImPlot::SetupAxisFormat.
+//  user_data points to a C string (the unit).
+// ============================================================
+static int y_axis_formatter(double value, char* buf, int size, void* user_data) {
+    const char* unit = static_cast<const char*>(user_data);
+    if (!unit) unit = "";
+
+    // Handle negative values: format absolute value and prepend '-'
+    if (value < 0.0) {
+        char tmp[48];
+        y_axis_formatter(-value, tmp, sizeof(tmp), user_data);
+        return std::snprintf(buf, static_cast<size_t>(size), "-%s", tmp);
+    }
+
+    std::string u(unit);
+    if (u == "bytes" || u == "bytes/s") {
+        if (value >= 1024.0 * 1024.0 * 1024.0)
+            return std::snprintf(buf, static_cast<size_t>(size), "%.1f GB", value / (1024.0*1024.0*1024.0));
+        if (value >= 1024.0 * 1024.0)
+            return std::snprintf(buf, static_cast<size_t>(size), "%.1f MB", value / (1024.0*1024.0));
+        if (value >= 1024.0)
+            return std::snprintf(buf, static_cast<size_t>(size), "%.1f KB", value / 1024.0);
+        return std::snprintf(buf, static_cast<size_t>(size), "%.0f B", value);
+    }
+    if (value >= 1000000.0)
+        return std::snprintf(buf, static_cast<size_t>(size), "%.1fM", value / 1000000.0);
+    if (value >= 1000.0)
+        return std::snprintf(buf, static_cast<size_t>(size), "%.1fK", value / 1000.0);
+    if (value == 0.0)
+        return std::snprintf(buf, static_cast<size_t>(size), "0");
+    if (value < 1.0)
+        return std::snprintf(buf, static_cast<size_t>(size), "%.2f", value);
+    return std::snprintf(buf, static_cast<size_t>(size), "%.1f", value);
+}
+
+// ============================================================
 //  fmt_metric_value
 // ============================================================
 void ChartPanelView::fmt_metric_value(char* buf, size_t bufsz,
@@ -240,8 +276,9 @@ void ChartPanelView::render_chart(const MetricSeries& series,
                                    float width,
                                    float chart_h)
 {
+    // Cumulative metrics always show rate — no toggle needed
     bool use_rate = series.is_cumulative && !series.rate.empty()
-                    && state.show_rate && series.timestamps_ms.size() >= 2;
+                    && series.timestamps_ms.size() >= 2;
     const auto& values = use_rate ? series.rate : series.values;
     if (values.empty()) return;
 
@@ -267,22 +304,65 @@ void ChartPanelView::render_chart(const MetricSeries& series,
         }
     }
 
-    // Chart title with controls
+    // ---- Compute Y-axis min/max from visible data with padding ----
+    double y_data_min =  std::numeric_limits<double>::max();
+    double y_data_max = -std::numeric_limits<double>::max();
+    for (double v : plot_y) {
+        if (v < y_data_min) y_data_min = v;
+        if (v > y_data_max) y_data_max = v;
+    }
+    if (y_data_min > y_data_max) {
+        y_data_min = 0.0;
+        y_data_max = 1.0;
+    }
+
+    // Auto-detect log scale: engage when value range spans >3 orders of
+    // magnitude (max/min > 1000) and all values are positive.
+    if (!state.initialized) {
+        state.show_rate = use_rate;
+        double pos_min = std::numeric_limits<double>::max();
+        double pos_max = 0.0;
+        for (double v : values) {
+            if (v > 0.0) {
+                if (v < pos_min) pos_min = v;
+                if (v > pos_max) pos_max = v;
+            }
+        }
+        state.log_scale = (pos_min > 0.0 && pos_max > 0.0
+                           && pos_max / pos_min > 1000.0
+                           && y_data_min >= 0.0);
+        state.initialized = true;
+    }
+
+    // Compute padded Y limits (10% padding above and below)
+    double y_range = y_data_max - y_data_min;
+    double y_pad   = (y_range > 0.0) ? y_range * 0.10 : 1.0;
+    double y_lo    = y_data_min - y_pad;
+    double y_hi    = y_data_max + y_pad;
+
+    // For rate/count metrics that can't go negative, clamp floor to 0
+    // (but allow a tiny negative for visual grounding when min is near 0)
+    if (use_rate || y_data_min >= 0.0) {
+        if (y_data_min >= 0.0 && y_data_min < y_range * 0.3) {
+            // Data baseline is near 0 — anchor at 0
+            y_lo = -y_pad * 0.1; // slight negative for visual grounding
+        }
+        // Don't go below 0 for rate metrics if min is well above 0
+        if (use_rate && y_lo < 0.0 && y_data_min > 0.0)
+            y_lo = 0.0;
+    }
+
+    // For log scale, ensure positive limits
+    if (state.log_scale) {
+        if (y_lo <= 0.0) y_lo = (y_data_min > 0.0) ? y_data_min * 0.5 : 0.1;
+        if (y_hi <= y_lo) y_hi = y_lo * 10.0;
+    }
+
+    // Chart title — no toggle buttons, just the metric name
     std::string title = series.display_name;
     if (use_rate) title += " (rate)";
 
-    // Draw rate/raw toggle + log scale toggle before the chart
     ImGui::PushID(series.path.c_str());
-    if (series.is_cumulative) {
-        if (ImGui::SmallButton(state.show_rate ? "rate" : "raw")) {
-            state.show_rate = !state.show_rate;
-        }
-        ImGui::SameLine();
-    }
-    if (ImGui::SmallButton(state.log_scale ? "log" : "lin")) {
-        state.log_scale = !state.log_scale;
-    }
-    ImGui::SameLine();
     ImGui::TextUnformatted(title.c_str());
 
     // Compute threshold for this series
@@ -296,7 +376,6 @@ void ChartPanelView::render_chart(const MetricSeries& series,
     // built-in scroll zoom is effectively overridden.
     ImPlotFlags plot_flags = ImPlotFlags_NoLegend | ImPlotFlags_NoMenus
                            | ImPlotFlags_NoBoxSelect | ImPlotFlags_NoChild;
-    ImPlotAxisFlags y_flags = ImPlotAxisFlags_AutoFit;
 
     if (ImPlot::BeginPlot(series.path.c_str(), ImVec2(width, chart_h), plot_flags))
     {
@@ -305,8 +384,11 @@ void ChartPanelView::render_chart(const MetricSeries& series,
             ImPlotAxisFlags_NoDecorations | ImPlotAxisFlags_NoHighlight);
         ImPlot::SetupAxisLimits(ImAxis_X1, x_view_min_, x_view_max_, ImGuiCond_Always);
 
-        // Y axis — auto-fit, optional log scale
-        ImPlot::SetupAxis(ImAxis_Y1, series.unit.c_str(), y_flags);
+        // Y axis — explicit padded limits, custom tick formatter
+        ImPlot::SetupAxis(ImAxis_Y1, nullptr, ImPlotAxisFlags_NoLabel);
+        ImPlot::SetupAxisLimits(ImAxis_Y1, y_lo, y_hi, ImGuiCond_Always);
+        ImPlot::SetupAxisFormat(ImAxis_Y1, y_axis_formatter,
+                                const_cast<char*>(series.unit.c_str()));
         if (state.log_scale)
             ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Log10);
 

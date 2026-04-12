@@ -19,10 +19,15 @@ struct NodeInfo;
 
 // ------------------------------------------------------------
 //  ChartState — per-metric chart render configuration
+//  Buttons removed: show_rate and log_scale are auto-computed,
+//  not user-toggled.  Cumulative metrics always show rate.
+//  Log scale engages automatically when value range spans >3
+//  orders of magnitude.
 // ------------------------------------------------------------
 struct ChartState {
-    bool show_rate  = true;   // show rate (delta/s) vs raw cumulative
-    bool log_scale  = false;  // Y axis log scale
+    bool show_rate  = true;   // always true for cumulative metrics
+    bool log_scale  = false;  // auto-computed from value range
+    bool initialized = false; // set once after first data scan
 };
 
 // ------------------------------------------------------------
