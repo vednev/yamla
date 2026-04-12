@@ -3,15 +3,20 @@
 #include <imgui.h>
 #include <cstring>
 #include <cctype>
-#include <map>
 #include <algorithm>
+#include <cmath>
 
 #include "../ftdc/metric_store.hpp"
 #include "../ftdc/metric_defs.hpp"
 
 // ---- Colors ----
-static constexpr ImVec4 COL_THRESHOLD_RED   = ImVec4(1.00f, 0.40f, 0.40f, 1.0f);
-static constexpr ImVec4 COL_SELECTED        = ImVec4(0.60f, 0.80f, 1.00f, 1.0f);
+static constexpr ImVec4 COL_CARD_ACTIVE    = ImVec4(0.15f, 0.35f, 0.55f, 1.0f);
+static constexpr ImVec4 COL_CARD_INACTIVE  = ImVec4(0.12f, 0.12f, 0.12f, 1.0f);
+static constexpr ImVec4 COL_CARD_HOVERED   = ImVec4(0.18f, 0.18f, 0.22f, 1.0f);
+static constexpr ImVec4 COL_BADGE_RED      = ImVec4(1.00f, 0.30f, 0.30f, 1.0f);
+static constexpr ImVec4 COL_BADGE_GREEN    = ImVec4(0.30f, 0.70f, 0.30f, 0.6f);
+static constexpr ImVec4 COL_SEARCH_MATCH   = ImVec4(0.60f, 0.80f, 1.00f, 1.0f);
+static constexpr ImVec4 COL_CUSTOM_TAG     = ImVec4(0.70f, 0.50f, 1.00f, 1.0f);
 
 static std::string to_lower_str(const std::string& s) {
     std::string out(s.size(), ' ');
@@ -25,182 +30,282 @@ static std::string to_lower_str(const std::string& s) {
 // ============================================================
 void MetricTreeView::set_store(const MetricStore* store) {
     store_ = store;
-    selected_metrics_.clear();
-    // Default to Overview preset on first load
+    // Initialize dashboard toggle state
     const auto& presets = preset_dashboards();
+    dashboard_active_.assign(presets.size(), false);
+    custom_metrics_.clear();
+    search_buf_[0] = '\0';
+    // Auto-select Overview (per D-21)
     if (!presets.empty()) {
-        for (const char* p : presets[0].metric_paths)
-            selected_metrics_.insert(p);
+        dashboard_active_[0] = true;
     }
+    rebuild_active_dashboards();
+    rebuild_selected();
 }
 
+// ============================================================
+//  clear_selection / set_selection
+// ============================================================
 void MetricTreeView::clear_selection() {
-    selected_metrics_.clear();
+    dashboard_active_.assign(dashboard_active_.size(), false);
+    custom_metrics_.clear();
+    rebuild_active_dashboards();
+    rebuild_selected();
     if (on_selection_changed_) on_selection_changed_();
 }
 
 void MetricTreeView::set_selection(const std::vector<std::string>& paths) {
-    selected_metrics_.clear();
-    for (const auto& p : paths) selected_metrics_.insert(p);
+    dashboard_active_.assign(dashboard_active_.size(), false);
+    custom_metrics_.clear();
+    for (const auto& p : paths) custom_metrics_.insert(p);
+    rebuild_active_dashboards();
+    rebuild_selected();
     if (on_selection_changed_) on_selection_changed_();
 }
 
 // ============================================================
-//  render_presets
+//  resolve_disk_paths — scan store for disk metrics
 // ============================================================
-void MetricTreeView::render_presets() {
+std::vector<std::string> MetricTreeView::resolve_disk_paths() const {
+    std::vector<std::string> result;
+    if (!store_) return result;
+    for (const auto& key : store_->ordered_keys) {
+        if (is_disk_metric(key))
+            result.push_back(key);
+    }
+    std::sort(result.begin(), result.end());
+    return result;
+}
+
+// ============================================================
+//  rebuild_active_dashboards
+// ============================================================
+void MetricTreeView::rebuild_active_dashboards() {
+    active_dashboards_.clear();
     const auto& presets = preset_dashboards();
+    for (size_t i = 0; i < presets.size(); ++i) {
+        if (i >= dashboard_active_.size() || !dashboard_active_[i]) continue;
+        std::vector<std::string> paths;
+        if (std::string(presets[i].name) == DISK_IO_DASHBOARD_NAME) {
+            // Dynamic resolution from store
+            paths = resolve_disk_paths();
+        } else {
+            for (const char* p : presets[i].metric_paths)
+                paths.emplace_back(p);
+        }
+        active_dashboards_.emplace_back(presets[i].name, std::move(paths));
+    }
+}
+
+// ============================================================
+//  rebuild_selected
+// ============================================================
+void MetricTreeView::rebuild_selected() {
+    selected_metrics_.clear();
+    for (const auto& [name, paths] : active_dashboards_) {
+        for (const auto& p : paths)
+            selected_metrics_.insert(p);
+    }
+    for (const auto& p : custom_metrics_)
+        selected_metrics_.insert(p);
+}
+
+// ============================================================
+//  check_anomaly — does any metric in dashboard[i] exceed threshold?
+// ============================================================
+bool MetricTreeView::check_anomaly(size_t dashboard_idx) const {
+    if (!store_) return false;
+    const auto& presets = preset_dashboards();
+    if (dashboard_idx >= presets.size()) return false;
+
+    // Resolve the metric paths for this dashboard
+    std::vector<std::string> paths;
+    if (std::string(presets[dashboard_idx].name) == DISK_IO_DASHBOARD_NAME) {
+        paths = resolve_disk_paths();
+    } else {
+        for (const char* p : presets[dashboard_idx].metric_paths)
+            paths.emplace_back(p);
+    }
+
+    for (const auto& path : paths) {
+        double thresh = metric_threshold(path);
+        if (std::isnan(thresh)) continue;
+
+        const MetricSeries* s = store_->get(path);
+        if (!s || s->empty()) continue;
+
+        bool is_cumul = metric_is_cumulative(path);
+        if (is_cumul) {
+            // Check last rate value against threshold
+            if (!s->rate.empty()) {
+                double last_rate = s->rate.back();
+                // threshold 0.0 means any non-zero rate is anomalous
+                if (thresh == 0.0) {
+                    if (last_rate > 0.0) return true;
+                } else {
+                    if (last_rate > thresh) return true;
+                }
+            }
+        } else {
+            // Gauge: check last raw value
+            double last_val = s->values.back();
+            if (last_val > thresh) return true;
+        }
+    }
+    return false;
+}
+
+// ============================================================
+//  render_dashboard_cards
+// ============================================================
+void MetricTreeView::render_dashboard_cards() {
     ImGui::TextDisabled("Dashboards");
     ImGui::Spacing();
 
+    const auto& presets = preset_dashboards();
     float avail_w = ImGui::GetContentRegionAvail().x;
-    float btn_w   = (avail_w - ImGui::GetStyle().ItemSpacing.x * 2) / 3.0f;
-    if (btn_w < 60.0f) btn_w = 60.0f;
+    // 2-column layout for dashboard cards
+    float card_w = (avail_w - ImGui::GetStyle().ItemSpacing.x) / 2.0f;
+    if (card_w < 80.0f) card_w = 80.0f;
 
     for (size_t i = 0; i < presets.size(); ++i) {
-        if (i > 0 && (i % 3) != 0) ImGui::SameLine();
-        else if (i > 0) {}
+        // Layout: 2 columns
+        if (i > 0 && (i % 2) != 0) ImGui::SameLine();
 
-        // Detect if this preset is currently active (all its paths selected)
-        bool preset_active = true;
-        for (const char* p : presets[i].metric_paths) {
-            if (!selected_metrics_.count(p)) { preset_active = false; break; }
-        }
+        ImGui::PushID(static_cast<int>(i));
 
-        if (preset_active) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.30f, 0.50f, 1.0f));
-        if (ImGui::Button(presets[i].name, ImVec2(btn_w, 0))) {
-            selected_metrics_.clear();
-            for (const char* p : presets[i].metric_paths)
-                selected_metrics_.insert(p);
+        bool active = (i < dashboard_active_.size()) && dashboard_active_[i];
+        bool has_anomaly = check_anomaly(i);
+
+        // Card styling: active=blue bg, inactive=dark bg
+        ImGui::PushStyleColor(ImGuiCol_Button,
+            active ? COL_CARD_ACTIVE : COL_CARD_INACTIVE);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, COL_CARD_HOVERED);
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, COL_CARD_ACTIVE);
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 4.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, active ? 1.5f : 0.5f);
+        ImGui::PushStyleColor(ImGuiCol_Border,
+            active ? ImVec4(0.3f, 0.5f, 0.8f, 1.0f) : ImVec4(0.25f, 0.25f, 0.25f, 1.0f));
+
+        float card_h = ImGui::GetTextLineHeightWithSpacing() + 8.0f;
+
+        // Draw the button (full card area)
+        if (ImGui::Button("##card", ImVec2(card_w, card_h))) {
+            dashboard_active_[i] = !dashboard_active_[i];
+            rebuild_active_dashboards();
+            rebuild_selected();
             if (on_selection_changed_) on_selection_changed_();
         }
-        if (preset_active) ImGui::PopStyleColor();
-    }
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
-}
 
-// ============================================================
-//  render_search_tree
-// ============================================================
-void MetricTreeView::render_search_tree() {
-    if (!store_) return;
+        ImGui::PopStyleVar(2);
+        ImGui::PopStyleColor(4);
 
-    // Search box
-    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-    ImGui::InputText("##search", search_buf_, sizeof(search_buf_));
+        // Overlay text + badge on the button
+        ImVec2 btn_min = ImGui::GetItemRectMin();
+        ImVec2 btn_max = ImGui::GetItemRectMax();
+        ImDrawList* dl = ImGui::GetWindowDrawList();
 
-    std::string search_lower = to_lower_str(search_buf_);
-    bool searching = search_lower.size() > 0;
+        // Dashboard name (left-aligned, vertically centered)
+        float text_y = btn_min.y + (btn_max.y - btn_min.y - ImGui::GetTextLineHeight()) * 0.5f;
+        dl->AddText(ImVec2(btn_min.x + 8.0f, text_y),
+            ImGui::GetColorU32(ImVec4(0.9f, 0.9f, 0.9f, 1.0f)),
+            presets[i].name);
 
-    ImGui::Spacing();
-
-    // Build a prefix tree (map of top-level key -> children paths)
-    // Traverse store_->ordered_keys grouped by first path component
-    std::map<std::string, std::vector<std::string>> top_groups;
-    for (const auto& path : store_->ordered_keys) {
-        // Filter by search
-        if (searching) {
-            std::string path_lower = to_lower_str(path);
-            if (path_lower.find(search_lower) == std::string::npos) continue;
-        }
-        size_t dot = path.find('.');
-        std::string top = (dot != std::string::npos) ? path.substr(0, dot) : path;
-        top_groups[top].push_back(path);
-    }
-
-    for (auto& [group_name, paths] : top_groups) {
-        // Push a unique ID for the group
-        ImGui::PushID(group_name.c_str());
-
-        bool group_open = ImGui::CollapsingHeader(group_name.c_str(),
-            searching ? ImGuiTreeNodeFlags_DefaultOpen : 0);
-
-        if (group_open) {
-            ImGui::Indent(12.0f);
-
-            // Further group by second component
-            std::map<std::string, std::vector<std::string>> sub_groups;
-            for (const auto& path : paths) {
-                size_t d1 = path.find('.');
-                size_t d2 = (d1 != std::string::npos) ? path.find('.', d1 + 1) : std::string::npos;
-                std::string subkey;
-                if (d2 != std::string::npos)
-                    subkey = path.substr(d1 + 1, d2 - d1 - 1);
-                else if (d1 != std::string::npos)
-                    subkey = path.substr(d1 + 1);
-                else
-                    subkey = path;
-                sub_groups[subkey].push_back(path);
-            }
-
-            for (auto& [sub_name, sub_paths] : sub_groups) {
-                if (sub_paths.size() == 1 && sub_paths[0].find('.') == sub_paths[0].rfind('.')) {
-                    // Leaf with no further nesting
-                    render_tree_node("", sub_paths, 0);
-                } else {
-                    ImGui::PushID(sub_name.c_str());
-                    bool sub_open = ImGui::CollapsingHeader(sub_name.c_str(),
-                        searching ? ImGuiTreeNodeFlags_DefaultOpen : 0);
-                    if (sub_open) {
-                        ImGui::Indent(12.0f);
-                        render_tree_node("", sub_paths, 1);
-                        ImGui::Unindent(12.0f);
-                    }
-                    ImGui::PopID();
-                }
-            }
-
-            ImGui::Unindent(12.0f);
+        // Anomaly badge (right side — small colored circle)
+        float badge_r = 4.0f;
+        float badge_cx = btn_max.x - 12.0f;
+        float badge_cy = btn_min.y + (btn_max.y - btn_min.y) * 0.5f;
+        if (has_anomaly) {
+            dl->AddCircleFilled(ImVec2(badge_cx, badge_cy), badge_r,
+                ImGui::GetColorU32(COL_BADGE_RED));
+        } else if (active) {
+            dl->AddCircleFilled(ImVec2(badge_cx, badge_cy), badge_r,
+                ImGui::GetColorU32(COL_BADGE_GREEN));
         }
 
         ImGui::PopID();
     }
+
+    ImGui::Spacing();
+    ImGui::Separator();
 }
 
 // ============================================================
-//  render_tree_node — leaf list
+//  render_search_overlay
 // ============================================================
-void MetricTreeView::render_tree_node(const std::string& /*prefix*/,
-                                       const std::vector<std::string>& paths,
-                                       int /*depth*/)
-{
-    for (const auto& path : paths) {
+void MetricTreeView::render_search_overlay() {
+    ImGui::Spacing();
+    ImGui::TextDisabled("Search Metrics");
+    ImGui::Spacing();
+
+    // Search input
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+    ImGui::InputText("##metric_search", search_buf_, sizeof(search_buf_));
+
+    std::string query = to_lower_str(search_buf_);
+    if (query.empty()) return;
+
+    // Show matching metrics in a scrollable list (max 15 results)
+    ImGui::Spacing();
+    int shown = 0;
+    for (const auto& path : store_->ordered_keys) {
+        if (shown >= 15) break;
+        std::string path_lower = to_lower_str(path);
+        // Also match against display name
+        std::string display = to_lower_str(metric_display_name(path));
+        if (path_lower.find(query) == std::string::npos &&
+            display.find(query) == std::string::npos) continue;
+
         ImGui::PushID(path.c_str());
 
-        bool selected = selected_metrics_.count(path) > 0;
-
-        // Threshold indicator dot
-        double thresh = metric_threshold(path);
-        bool has_threshold = !std::isnan(thresh);
-
-        if (has_threshold) {
-            ImGui::PushStyleColor(ImGuiCol_Text, COL_THRESHOLD_RED);
-            ImGui::TextUnformatted("!");
-            ImGui::PopStyleColor();
-            ImGui::SameLine();
+        bool is_custom = custom_metrics_.count(path) > 0;
+        bool in_dashboard = false;
+        // Check if this metric is already in an active dashboard
+        for (const auto& [name, paths] : active_dashboards_) {
+            for (const auto& dp : paths) {
+                if (dp == path) { in_dashboard = true; break; }
+            }
+            if (in_dashboard) break;
         }
 
-        // Checkbox
-        if (ImGui::Checkbox("##chk", &selected)) {
-            if (selected) selected_metrics_.insert(path);
-            else          selected_metrics_.erase(path);
-            if (on_selection_changed_) on_selection_changed_();
+        // Show checkbox for toggling custom selection
+        bool chk_state = is_custom || in_dashboard;
+        if (in_dashboard) {
+            // Already in an active dashboard — show as disabled checked
+            ImGui::PushStyleColor(ImGuiCol_CheckMark, ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
+            ImGui::Checkbox("##chk", &chk_state);
+            ImGui::PopStyleColor();
+        } else {
+            if (ImGui::Checkbox("##chk", &chk_state)) {
+                if (chk_state) custom_metrics_.insert(path);
+                else           custom_metrics_.erase(path);
+                rebuild_selected();
+                if (on_selection_changed_) on_selection_changed_();
+            }
         }
         ImGui::SameLine();
 
-        // Display name (colored if selected)
-        std::string label = metric_display_name(path);
-        std::string unit  = metric_unit(path);
-        if (!unit.empty() && unit != "count") label += " (" + unit + ")";
-
-        if (selected) ImGui::PushStyleColor(ImGuiCol_Text, COL_SELECTED);
-        else          ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.85f, 0.85f, 0.85f, 1.0f));
-        ImGui::TextUnformatted(label.c_str());
+        // Display name
+        ImGui::PushStyleColor(ImGuiCol_Text,
+            is_custom ? COL_CUSTOM_TAG :
+            in_dashboard ? ImVec4(0.5f, 0.5f, 0.5f, 1.0f) :
+            COL_SEARCH_MATCH);
+        ImGui::TextUnformatted(metric_display_name(path).c_str());
         ImGui::PopStyleColor();
 
+        // Tooltip with full path
+        if (ImGui::IsItemHovered()) {
+            ImGui::BeginTooltip();
+            ImGui::TextUnformatted(path.c_str());
+            ImGui::EndTooltip();
+        }
+
         ImGui::PopID();
+        ++shown;
+    }
+
+    if (shown == 0) {
+        ImGui::TextDisabled("No metrics match '%s'", search_buf_);
     }
 }
 
@@ -213,6 +318,35 @@ void MetricTreeView::render_inner() {
         return;
     }
 
-    render_presets();
-    render_search_tree();
+    render_dashboard_cards();
+
+    // Show count of active selections
+    if (!selected_metrics_.empty()) {
+        ImGui::TextDisabled("%zu metrics selected", selected_metrics_.size());
+        ImGui::Spacing();
+    }
+
+    // Show custom metric tags (if any) with remove buttons
+    if (!custom_metrics_.empty()) {
+        ImGui::TextDisabled("Custom:");
+        // Copy keys to avoid iterator invalidation on erase
+        std::vector<std::string> custom_copy(custom_metrics_.begin(),
+                                             custom_metrics_.end());
+        for (const auto& path : custom_copy) {
+            ImGui::PushID(path.c_str());
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.15f, 0.35f, 1.0f));
+            std::string label = metric_display_name(path) + " x";
+            if (ImGui::SmallButton(label.c_str())) {
+                custom_metrics_.erase(path);
+                rebuild_selected();
+                if (on_selection_changed_) on_selection_changed_();
+            }
+            ImGui::PopStyleColor();
+            ImGui::PopID();
+        }
+        ImGui::Spacing();
+        ImGui::Separator();
+    }
+
+    render_search_overlay();
 }

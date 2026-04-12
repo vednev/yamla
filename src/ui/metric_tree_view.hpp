@@ -88,5 +88,4 @@ private:
 
     // Search overlay state
     char search_buf_[256] = {};
-    bool search_focused_ = false;
 };
