@@ -87,7 +87,7 @@ ALL_OBJS := $(OBJS) $(BACKEND_OBJS) $(VENDOR_C_OBJS)
 
 # ---- Targets -----------------------------------------------
 
-.PHONY: all deps clean run
+.PHONY: all deps clean run test
 
 all: $(TARGET)
 
@@ -146,3 +146,25 @@ fonts:
 	  rm /tmp/_plexsans.zip
 	@echo "Fonts ready in vendor/fonts/:"
 	@ls -lh vendor/fonts/
+
+# ---- Test target -------------------------------------------
+CATCH2_CFLAGS := $(shell PKG_CONFIG_PATH=$(CONAN_PC) pkg-config --cflags catch2-with-main 2>/dev/null)
+CATCH2_LIBS   := $(shell PKG_CONFIG_PATH=$(CONAN_PC) pkg-config --libs   catch2-with-main 2>/dev/null)
+
+TEST_SRCS := $(shell find test -name '*.cpp' 2>/dev/null)
+TEST_OBJS := $(patsubst test/%.cpp, $(BUILDDIR)/test/%.o, $(TEST_SRCS))
+
+# Source files needed by tests (exclude main.cpp, ui/, llm_client.cpp)
+TEST_DEP_SRCS := $(filter-out src/main.cpp, $(filter-out src/ui/%, $(filter-out src/llm/llm_client.cpp, $(SRCS))))
+TEST_DEP_OBJS := $(patsubst $(SRCDIR)/%.cpp, $(BUILDDIR)/%.o, $(TEST_DEP_SRCS))
+
+TEST_CXXFLAGS := $(CXXFLAGS) $(CATCH2_CFLAGS)
+TEST_LDFLAGS  := $(CATCH2_LIBS) $(CONAN_LIBS) $(SSL_LIBS)
+
+test: $(TEST_OBJS) $(TEST_DEP_OBJS)
+	$(CXX) $(TEST_CXXFLAGS) -o build/run_tests $^ $(TEST_LDFLAGS)
+	./build/run_tests
+
+$(BUILDDIR)/test/%.o: test/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(TEST_CXXFLAGS) -c $< -o $@

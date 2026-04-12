@@ -8,10 +8,10 @@ class YamlaConan(ConanFile):
     generators = "PkgConfigDeps", "VirtualRunEnv"
 
     def requirements(self):
-        self.requires("sdl/2.28.5")
         self.requires("simdjson/3.12.3")
         self.requires("imgui/1.90.5")
         self.requires("implot/0.16")
+        self.requires("catch2/3.7.1")
 
     def configure(self):
         self.options["imgui"].shared = False
