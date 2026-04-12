@@ -49,6 +49,8 @@ void FtdcView::start_load(const std::string& path) {
 // ============================================================
 void FtdcView::on_selection_changed() {
     chart_panel_.set_selected_metrics(&tree_view_.selected());
+    chart_panel_.set_dashboard_groups(&tree_view_.active_dashboards());
+    chart_panel_.set_custom_metrics(&tree_view_.custom_metrics());
 }
 
 // ============================================================
@@ -130,6 +132,8 @@ void FtdcView::poll_state() {
         tree_view_.set_on_selection_changed([this] { on_selection_changed(); });
         chart_panel_.set_store(&cluster_->store());
         chart_panel_.set_selected_metrics(&tree_view_.selected());
+        chart_panel_.set_dashboard_groups(&tree_view_.active_dashboards());
+        chart_panel_.set_custom_metrics(&tree_view_.custom_metrics());
         chart_panel_.set_filter(filter_);
         chart_panel_.set_log_data(log_entries_, log_strings_);
         on_selection_changed();

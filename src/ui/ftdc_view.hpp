@@ -71,5 +71,5 @@ private:
     const StringTable*                  log_strings_ = nullptr;
 
     // Splitter between tree and chart panels
-    float left_w_ = 280.0f;
+    float left_w_ = 300.0f;
 };
