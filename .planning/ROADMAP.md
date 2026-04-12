@@ -35,9 +35,15 @@ Plans:
 
 **Context:** `.planning/phases/03-ftdc-support/03-CONTEXT.md`
 
-Plans: TBD
+**Plans:** 4 plans
+
+Plans:
+- [ ] 03-01-PLAN.md — Extract FTDC core + UI source files from wip-ftdc branch
+- [ ] 03-02-PLAN.md — Write Catch2 tests for FtdcParser and FtdcAnalyzer (TDD)
+- [ ] 03-03-PLAN.md — App integration: tab bar, drop detection, cross-view linking
+- [ ] 03-04-PLAN.md — Build system (zlib), CI update, full build + test verification
 
 ---
 
 *Roadmap created: 2026-04-12*
-*Updated: 2026-04-12 — Phases 1 & 2 marked complete, Phase 3 added*
+*Updated: 2026-04-12 — Phases 1 & 2 marked complete, Phase 3 planned (4 plans, 3 waves)*
