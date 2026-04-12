@@ -6,6 +6,7 @@
 #include <cstring>
 #include <algorithm>
 #include <cmath>
+#include <ctime>
 
 #include "../ftdc/metric_store.hpp"
 #include "../ftdc/metric_defs.hpp"
@@ -525,13 +526,15 @@ void ChartPanelView::render_chart(const MetricSeries& series,
     // Axis limits are forced every frame via ImGuiCond_Always, so ImPlot's
     // built-in scroll zoom is effectively overridden.
     ImPlotFlags plot_flags = ImPlotFlags_NoLegend | ImPlotFlags_NoMenus
-                           | ImPlotFlags_NoBoxSelect | ImPlotFlags_NoChild;
+                           | ImPlotFlags_NoBoxSelect | ImPlotFlags_NoChild
+                           | ImPlotFlags_NoMouseText;
 
     if (ImPlot::BeginPlot(series.path.c_str(), ImVec2(width, chart_h), plot_flags))
     {
-        // X axis — linked across all charts
+        // X axis — linked across all charts, time-formatted tick labels
         ImPlot::SetupAxis(ImAxis_X1, nullptr,
-            ImPlotAxisFlags_NoDecorations | ImPlotAxisFlags_NoHighlight);
+            ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoHighlight);
+        ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Time);
         ImPlot::SetupAxisLimits(ImAxis_X1, x_view_min_, x_view_max_, ImGuiCond_Always);
 
         // Y axis — unit-aware padded limits, custom tick formatter.
@@ -593,9 +596,24 @@ void ChartPanelView::render_chart(const MetricSeries& series,
             crosshair_x_  = ImPlot::GetPlotMousePos().x;
             hover_time_ms_ = plot_to_ms(crosshair_x_);
 
-            // Tooltip: show value at hover time
+            // Tooltip: show timestamp + value at hover time
             if (!dragging_) {
                 ImGui::BeginTooltip();
+                // Format timestamp from epoch ms
+                {
+                    int64_t t_ms = plot_to_ms(crosshair_x_);
+                    time_t  t_sec = static_cast<time_t>(t_ms / 1000);
+                    int     t_frac_ms = static_cast<int>(t_ms % 1000);
+                    struct tm tm_buf;
+#if defined(_WIN32)
+                    localtime_s(&tm_buf, &t_sec);
+#else
+                    localtime_r(&t_sec, &tm_buf);
+#endif
+                    char time_str[32];
+                    std::strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm_buf);
+                    ImGui::TextDisabled("%s.%03d", time_str, t_frac_ms);
+                }
                 size_t hover_idx = FtdcAnalyzer::find_sample_at(ts,
                     plot_to_ms(crosshair_x_));
                 if (hover_idx < values.size()) {
