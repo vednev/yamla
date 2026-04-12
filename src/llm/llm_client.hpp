@@ -4,6 +4,11 @@
 #include <thread>
 #include <atomic>
 #include <functional>
+#include <memory>
+
+// Forward declare httplib types to avoid pulling the massive header everywhere.
+// The actual include is in llm_client.cpp.
+namespace httplib { class Client; }
 
 #include "llm_types.hpp"
 #include "llm_tools.hpp"
@@ -56,6 +61,10 @@ public:
     // Check if API key is configured
     bool is_configured() const;
 
+    // Cancel any in-flight request and join the worker thread.
+    // Safe to call before destroying referenced data.
+    void cancel_and_join();
+
 private:
     void run_loop();  // background thread entry point
 
@@ -65,7 +74,13 @@ private:
     ConversationState  conversation_;
 
     std::atomic<bool>  thinking_{false};
+    std::atomic<bool>  cancel_{false};  // signals worker to abort
     std::thread        worker_;
+
+    // HTTP client pointer — kept as member so destructor can call stop()
+    // to abort an in-flight request, unblocking the worker thread.
+    std::mutex                        cli_mu_;
+    std::unique_ptr<httplib::Client>  cli_;
 
     mutable std::mutex error_mu_;
     std::string        last_error_;

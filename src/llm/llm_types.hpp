@@ -70,6 +70,7 @@ public:
         std::lock_guard<std::mutex> lock(mu_);
         history_.push_back(std::move(msg));
         size_.store(history_.size(), std::memory_order_release);
+        version_.fetch_add(1, std::memory_order_release);
     }
 
     // Get current size without locking (for UI fast-path check)
@@ -92,13 +93,51 @@ public:
         std::lock_guard<std::mutex> lock(mu_);
         history_.clear();
         size_.store(0, std::memory_order_release);
+        version_.fetch_add(1, std::memory_order_release);
     }
 
     // Check if empty
     bool empty() const { return size() == 0; }
 
+    // Get the version counter (incremented on every mutation)
+    size_t version() const { return version_.load(std::memory_order_acquire); }
+
+    // Append text to the last message's last Text content block.
+    // Used for streaming deltas — avoids creating a new message per token.
+    void append_to_last(const std::string& text) {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (history_.empty()) return;
+        auto& msg = history_.back();
+        // Find the last Text block, or create one
+        bool found = false;
+        for (auto it = msg.content.rbegin(); it != msg.content.rend(); ++it) {
+            if (it->type == ContentBlock::Text) {
+                it->text += text;
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            ContentBlock b;
+            b.type = ContentBlock::Text;
+            b.text = text;
+            msg.content.push_back(std::move(b));
+        }
+        // Bump version so UI detects the change
+        version_.fetch_add(1, std::memory_order_release);
+    }
+
+    // Replace the last message (used to swap streaming placeholder with full message)
+    void replace_last(ChatMessage msg) {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (!history_.empty())
+            history_.back() = std::move(msg);
+        version_.fetch_add(1, std::memory_order_release);
+    }
+
 private:
     mutable std::mutex           mu_;
     std::vector<ChatMessage>     history_;
     std::atomic<size_t>          size_{0};
+    std::atomic<size_t>          version_{0};  // increments on any mutation
 };

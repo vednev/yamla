@@ -3,6 +3,7 @@
 #include "../analysis/analyzer.hpp"
 #include "../parser/log_entry.hpp"
 #include "../core/chunk_vector.hpp"
+#include "../core/json_escape.hpp"
 
 #include <simdjson.h>
 #include <cstdio>
@@ -25,30 +26,8 @@ static thread_local simdjson::dom::parser tl_detail_parser;
 
 // ------------------------------------------------------------
 //  Helpers — minimal JSON building without a library
+//  json_escape(const std::string&) is provided by json_escape.hpp
 // ------------------------------------------------------------
-static std::string json_escape(const std::string& s) {
-    std::string out;
-    out.reserve(s.size() + 16);
-    for (char c : s) {
-        switch (c) {
-            case '"':  out += "\\\""; break;
-            case '\\': out += "\\\\"; break;
-            case '\n': out += "\\n";  break;
-            case '\r': out += "\\r";  break;
-            case '\t': out += "\\t";  break;
-            default:
-                if (static_cast<unsigned char>(c) < 0x20) {
-                    char buf[8];
-                    std::snprintf(buf, sizeof(buf), "\\u%04x", (unsigned)c);
-                    out += buf;
-                } else {
-                    out += c;
-                }
-        }
-    }
-    return out;
-}
-
 static std::string json_escape(std::string_view sv) {
     return json_escape(std::string(sv));
 }
@@ -519,8 +498,10 @@ std::string LlmTools::exec_get_entry_detail(const std::string& input_json) const
 #else
     int fd = ::open(file_path.c_str(), O_RDONLY);
     if (fd < 0) return "{\"error\":\"Cannot open file\"}";
-    ::pread(fd, buf.data(), rlen, static_cast<off_t>(offset));
+    ssize_t bytes_read = ::pread(fd, buf.data(), rlen, static_cast<off_t>(offset));
     ::close(fd);
+    if (bytes_read < 0 || static_cast<size_t>(bytes_read) != rlen)
+        return "{\"error\":\"File read failed or was truncated\"}";
 #endif
 
     // Return the raw JSON line directly
