@@ -143,18 +143,22 @@ static int format_value_with_unit(double value, char* buf, int size,
     }
 
     // ---- Time-rates: ms/s and us/s ----
+    // These mean "milliseconds (or microseconds) of X per second of wall
+    // time."  Scaling the time component (ms→s) produces nonsense like
+    // "seconds/second."  Instead, use SI prefixes on the raw number and
+    // keep the original unit label.
     if (u == "ms/s") {
-        if (value >= 60000.0)
-            return std::snprintf(buf, sz, "%.*f min/s", decimals, value / 60000.0);
+        if (value >= 1000000.0)
+            return std::snprintf(buf, sz, "%.*fM ms/s", decimals, value / 1000000.0);
         if (value >= 1000.0)
-            return std::snprintf(buf, sz, "%.*f s/s", decimals, value / 1000.0);
+            return std::snprintf(buf, sz, "%.*fK ms/s", decimals, value / 1000.0);
         return std::snprintf(buf, sz, "%.*f ms/s", decimals, value);
     }
     if (u == "us/s") {
         if (value >= 1000000.0)
-            return std::snprintf(buf, sz, "%.*f s/s", decimals, value / 1000000.0);
+            return std::snprintf(buf, sz, "%.*fM us/s", decimals, value / 1000000.0);
         if (value >= 1000.0)
-            return std::snprintf(buf, sz, "%.*f ms/s", decimals, value / 1000.0);
+            return std::snprintf(buf, sz, "%.*fK us/s", decimals, value / 1000.0);
         return std::snprintf(buf, sz, "%.0f us/s", value);
     }
 
