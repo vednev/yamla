@@ -116,6 +116,8 @@ App::App() {
     breakdown_view_.set_on_filter_changed([this] { on_filter_changed(); });
     breakdown_view_.set_prefs(&prefs_);
 
+    ftdc_view_.set_filter(&filter_);
+
     prefs_view_.set_prefs(&prefs_);
     prefs_view_.set_on_changed([this](const Prefs& p) {
         prefs_ = p;
@@ -491,11 +493,34 @@ void App::setup_llm() {
     llm_client_.set_system_prompt(system);
 }
 
+// Detect if a dropped path is FTDC data (diagnostic.data dir or metrics.* file)
+static bool is_ftdc_path(const std::string& path) {
+    if (path.find("diagnostic.data") != std::string::npos) return true;
+    // Check basename starts with "metrics"
+    auto sep = path.rfind('/');
+#if defined(_WIN32)
+    auto sep2 = path.rfind('\\');
+    if (sep2 != std::string::npos && (sep == std::string::npos || sep2 > sep))
+        sep = sep2;
+#endif
+    std::string basename = (sep != std::string::npos) ? path.substr(sep + 1) : path;
+    return basename.size() >= 7 && basename.substr(0, 7) == "metrics";
+}
+
 // ------------------------------------------------------------
 //  handle_drop
 // ------------------------------------------------------------
 void App::handle_drop(const std::vector<std::string>& paths) {
     if (paths.empty()) return;
+
+    // Auto-detect FTDC data: route to FTDC view
+    if (is_ftdc_path(paths[0])) {
+        ftdc_view_.start_load(paths[0]);
+        active_tab_ = 1;
+        force_tab_switch_ = true;
+        return;
+    }
+
     if (load_thread_.joinable()) load_thread_.join();
 
     // If LLM is currently thinking, wait for it to finish before
@@ -706,77 +731,108 @@ void App::render_dockspace() {
     ImGui::Begin("##host", nullptr, host_flags);
     ImGui::PopStyleVar(2);
 
-    // Three-column layout: Breakdowns | Log View | Detail View
+    // ---- Tab bar: show only when FTDC data is loaded (per D-06) ----
+    bool show_tab_bar = (ftdc_view_.load_state() != FtdcLoadState::Idle);
+
+    if (show_tab_bar) {
+        if (ImGui::BeginTabBar("##main_tabs", ImGuiTabBarFlags_None)) {
+            ImGuiTabItemFlags logs_flags = (active_tab_ == 0 && force_tab_switch_)
+                ? ImGuiTabItemFlags_SetSelected : 0;
+            ImGuiTabItemFlags ftdc_flags = (active_tab_ == 1 && force_tab_switch_)
+                ? ImGuiTabItemFlags_SetSelected : 0;
+            if (force_tab_switch_) force_tab_switch_ = false;
+
+            if (ImGui::BeginTabItem("Logs", nullptr, logs_flags)) {
+                active_tab_ = 0;
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("FTDC", nullptr, ftdc_flags)) {
+                active_tab_ = 1;
+                ImGui::EndTabItem();
+            }
+            ImGui::EndTabBar();
+        }
+    }
+
     ImVec2 avail = ImGui::GetContentRegionAvail();
-    float h           = avail.y;
-    float vsplitter_w = 6.0f; // vertical (left-column-width) splitter
+    float h = avail.y;
 
-    // ---- Left column — single unified scrollable filter panel ----
-    bool has_data = cluster_ && cluster_->state() == LoadState::Ready;
-    ImGui::BeginChild("##left_col", ImVec2(left_w_, h), true);
-    if (has_data)
-        breakdown_view_.render();
-    else
-        ImGui::TextDisabled("Drop MongoDB log files here to begin.");
-    ImGui::EndChild();
+    if (!show_tab_bar || active_tab_ == 0) {
+        // ---- Logs tab: existing three-column layout ----
+        float vsplitter_w = 6.0f; // vertical (left-column-width) splitter
 
-    // Splitter between left column and log view (controls left_w_)
-    ImGui::SameLine(0, 0);
-    ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0,0,0,0));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1,1,1,0.20f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(1,1,1,0.40f));
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0,0));
-    ImGui::Button("##leftsplit", ImVec2(vsplitter_w, h));
-    ImGui::PopStyleVar();
-    ImGui::PopStyleColor(3);
-    if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
-    if (ImGui::IsItemActive()) {
-        float delta = ImGui::GetIO().MouseDelta.x;
-        left_w_ += delta;
-        left_w_  = std::max(180.0f, std::min(avail.x * 0.45f, left_w_));
+        // ---- Left column — single unified scrollable filter panel ----
+        bool has_data = cluster_ && cluster_->state() == LoadState::Ready;
+        ImGui::BeginChild("##left_col", ImVec2(left_w_, h), true);
+        if (has_data)
+            breakdown_view_.render();
+        else
+            ImGui::TextDisabled("Drop MongoDB log files here to begin.");
+        ImGui::EndChild();
+
+        // Splitter between left column and log view (controls left_w_)
+        ImGui::SameLine(0, 0);
+        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0,0,0,0));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1,1,1,0.20f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(1,1,1,0.40f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0,0));
+        ImGui::Button("##leftsplit", ImVec2(vsplitter_w, h));
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor(3);
+        if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+        if (ImGui::IsItemActive()) {
+            float delta = ImGui::GetIO().MouseDelta.x;
+            left_w_ += delta;
+            left_w_  = std::max(180.0f, std::min(avail.x * 0.45f, left_w_));
+        }
+
+        ImGui::SameLine(0, 0);
+
+        // Centre: log view — takes all remaining space
+        float splitter_w = 6.0f; // right splitter width
+        // left_w_ + left-vsplitter + center + right-vsplitter + right_w_
+        float center_w_actual = avail.x - left_w_ - vsplitter_w - right_w_ - splitter_w - 2.0f;
+        center_w_actual = std::max(center_w_actual, 120.0f);
+
+        ImGui::BeginChild("##logview", ImVec2(center_w_actual, h), true);
+        log_view_.render_inner();
+        ImGui::EndChild();
+
+        ImGui::SameLine(0, 0);
+
+        // ---- Splitter between log view and detail panel ----
+        // Transparent normally; bright white when dragging so the user can see it.
+        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1, 1, 1, 0.20f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(1, 1, 1, 0.40f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
+        ImGui::Button("##splitter", ImVec2(splitter_w, h));
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor(3);
+
+        if (ImGui::IsItemHovered())
+            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+
+        if (ImGui::IsItemActive()) {
+            float delta = ImGui::GetIO().MouseDelta.x;
+            right_w_ -= delta; // dragging right → delta > 0 → shrink right panel
+            float min_w = 180.0f;
+            float max_w = avail.x - left_w_ - vsplitter_w - splitter_w - 120.0f;
+            right_w_ = std::max(min_w, std::min(max_w, right_w_));
+        }
+
+        ImGui::SameLine(0, 0);
+
+        // Right: detail view (resizable)
+        ImGui::BeginChild("##detail", ImVec2(right_w_, h), true);
+        detail_view_.render_inner();
+        ImGui::EndChild();
     }
 
-    ImGui::SameLine(0, 0);
-
-    // Centre: log view — takes all remaining space
-    float splitter_w = 6.0f; // right splitter width
-    // left_w_ + left-vsplitter + center + right-vsplitter + right_w_
-    float center_w_actual = avail.x - left_w_ - vsplitter_w - right_w_ - splitter_w - 2.0f;
-    center_w_actual = std::max(center_w_actual, 120.0f);
-
-    ImGui::BeginChild("##logview", ImVec2(center_w_actual, h), true);
-    log_view_.render_inner();
-    ImGui::EndChild();
-
-    ImGui::SameLine(0, 0);
-
-    // ---- Splitter between log view and detail panel ----
-    // Transparent normally; bright white when dragging so the user can see it.
-    ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0, 0, 0, 0));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1, 1, 1, 0.20f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(1, 1, 1, 0.40f));
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
-    ImGui::Button("##splitter", ImVec2(splitter_w, h));
-    ImGui::PopStyleVar();
-    ImGui::PopStyleColor(3);
-
-    if (ImGui::IsItemHovered())
-        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
-
-    if (ImGui::IsItemActive()) {
-        float delta = ImGui::GetIO().MouseDelta.x;
-        right_w_ -= delta; // dragging right → delta > 0 → shrink right panel
-        float min_w = 180.0f;
-        float max_w = avail.x - left_w_ - vsplitter_w - splitter_w - 120.0f;
-        right_w_ = std::max(min_w, std::min(max_w, right_w_));
+    if (show_tab_bar && active_tab_ == 1) {
+        // ---- FTDC tab: two-column layout ----
+        ftdc_view_.render(h);
     }
-
-    ImGui::SameLine(0, 0);
-
-    // Right: detail view (resizable)
-    ImGui::BeginChild("##detail", ImVec2(right_w_, h), true);
-    detail_view_.render_inner();
-    ImGui::EndChild();
 
     ImGui::End();
 }
@@ -860,6 +916,9 @@ void App::render_loading_popup() {
     }
 
     ImGui::End();
+
+    // FTDC loading popup (separate from cluster loading popup)
+    ftdc_view_.render_loading_popup();
 }
 
 // ------------------------------------------------------------
@@ -887,9 +946,20 @@ void App::render_frame() {
             llm_client_.tools().set_cluster(cluster_.get());
             // Clear conversation — old data context is stale
             llm_client_.clear();
+
+            // Build flat pointer list for FTDC annotation markers
+            log_entry_ptrs_.clear();
+            const auto& entries = cluster_->entries();
+            log_entry_ptrs_.reserve(entries.size());
+            for (size_t i = 0; i < entries.size(); ++i)
+                log_entry_ptrs_.push_back(&entries[i]);
+            ftdc_view_.set_log_data(&log_entry_ptrs_, &cluster_->strings());
         }
         last_cluster_state_ = cur;
     }
+
+    // Poll FTDC load state every frame (catch Loading→Ready even when tab not active)
+    ftdc_view_.poll_state();
 
     render_menu_bar();
 

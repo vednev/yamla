@@ -28,6 +28,7 @@ struct ID3D11RenderTargetView;
 #include "font_manager.hpp"
 #include "prefs_view.hpp"
 #include "chat_view.hpp"
+#include "ftdc_view.hpp"
 
 // ------------------------------------------------------------
 //  App
@@ -128,6 +129,16 @@ private:
     LlmClient   llm_client_;
     ChatView     chat_view_;
     std::string  knowledge_text_;   // loaded from knowledge/ at startup
+
+    // FTDC view
+    FtdcView    ftdc_view_;
+
+    // Active tab: 0 = Logs, 1 = FTDC
+    int  active_tab_       = 0;
+    bool force_tab_switch_ = false; // one-shot flag for programmatic tab switch
+
+    // Flat pointer list for FTDC annotation markers (rebuilt on log load)
+    std::vector<const LogEntry*> log_entry_ptrs_;
 
     void load_knowledge();          // reads knowledge/*.md into knowledge_text_
     void setup_llm();               // configure client after prefs load
