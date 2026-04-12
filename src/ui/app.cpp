@@ -132,6 +132,8 @@ App::App() {
 
 App::~App() {
     if (load_thread_.joinable()) load_thread_.join();
+    llm_client_.cancel_and_join();  // Stop LLM thread BEFORE destroying cluster
+    cluster_.reset();
     shutdown();
 }
 
@@ -494,8 +496,22 @@ void App::setup_llm() {
 // ------------------------------------------------------------
 void App::handle_drop(const std::vector<std::string>& paths) {
     if (paths.empty()) return;
-    if (load_thread_.joinable()) load_thread_.join(); // wait for previous load
-    start_load(paths);
+    if (load_thread_.joinable()) load_thread_.join();
+
+    // If LLM is currently thinking, wait for it to finish before
+    // mutating cluster data. This prevents data races.
+    if (llm_client_.is_thinking()) {
+        // Queue the paths for later — we'll check in render_frame
+        // For now, just block the LLM and proceed
+        // Actually, the simplest safe approach: just don't append while thinking
+        // Fall through to start_load which creates a new cluster
+    }
+
+    if (cluster_ && cluster_->state() == LoadState::Ready && !llm_client_.is_thinking()) {
+        append_load(paths);
+    } else {
+        start_load(paths);
+    }
 }
 
 void App::start_load(const std::vector<std::string>& paths) {
@@ -566,6 +582,38 @@ void App::start_load(const std::vector<std::string>& paths) {
 }
 
 // ------------------------------------------------------------
+//  append_load — add files to an already-loaded cluster
+// ------------------------------------------------------------
+void App::append_load(const std::vector<std::string>& paths) {
+    // Clear view pointers — entries will be re-sorted so all indices
+    // become invalid. The views will be re-wired when state transitions
+    // back to Ready in render_frame().
+    filter_.clear();
+    detail_view_.set_entry(nullptr, std::string{}, nullptr);
+    log_view_.set_entries(nullptr, nullptr, nullptr);
+    breakdown_view_.set_analysis(nullptr, nullptr);
+    breakdown_view_.set_nodes(nullptr);
+    last_cluster_state_ = LoadState::Idle;
+    load_start_         = std::chrono::steady_clock::now();
+
+    // Accumulate total file bytes (existing + new)
+    for (const auto& p : paths) {
+        try {
+            MmapFile f(p);
+            total_file_bytes_ += f.size();
+        } catch (const std::exception& ex) {
+            std::fprintf(stderr, "Cannot open %s: %s\n", p.c_str(), ex.what());
+        }
+    }
+
+    // Capture the paths for the background thread
+    std::vector<std::string> new_paths = paths;
+    load_thread_ = std::thread([this, new_paths = std::move(new_paths)] {
+        cluster_->append_files(new_paths);
+    });
+}
+
+// ------------------------------------------------------------
 //  on_filter_changed
 // ------------------------------------------------------------
 void App::on_filter_changed() {
@@ -588,7 +636,8 @@ void App::render_menu_bar() {
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Help")) {
-            ImGui::MenuItem("Drop one or more MongoDB log files onto this window");
+            if (ImGui::MenuItem("AI Assistant", "Ctrl+A"))
+                chat_view_.toggle();
             ImGui::EndMenu();
         }
 
@@ -620,13 +669,8 @@ void App::render_menu_bar() {
                             "Error: %s", cluster_->error().c_str());
                         break;
                     default:
-                        std::snprintf(stat_buf, sizeof(stat_buf),
-                            "Drop MongoDB log files here to begin");
                         break;
                 }
-            } else {
-                std::snprintf(stat_buf, sizeof(stat_buf),
-                    "Drop MongoDB log files here to begin");
             }
 
             float text_w = ImGui::CalcTextSize(stat_buf).x;

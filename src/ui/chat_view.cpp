@@ -157,60 +157,31 @@ struct MdRenderState {
         push_pending();
         if (segments.empty()) return;
 
-        // Build the combined string and record bold ranges
-        struct BoldRange { size_t start; size_t len; };
+        // Build the combined string
         std::string combined;
-        std::vector<BoldRange> bold_ranges;
-        bool has_code = false;
+        bool all_code = !segments.empty();
         for (auto& seg : segments) {
-            if (seg.bold)
-                bold_ranges.push_back({combined.size(), seg.text.size()});
-            if (seg.code_span) has_code = true;
+            if (!seg.code_span) all_code = false;
             combined += seg.text;
         }
         segments.clear();
 
         if (combined.empty()) return;
 
-        // If the entire block is a single code span, render in code color
-        // Otherwise use default text color (bold regions get overlay below)
-        ImVec4 text_color = (segments.empty() && has_code && bold_ranges.empty())
+        // Only use code color (green) if ALL segments are code spans.
+        // Mixed blocks (text + inline code) use default text color.
+        ImVec4 text_color = all_code
             ? ImVec4(0.4f, 0.9f, 0.4f, 1.0f)
             : ImGui::GetStyleColorVec4(ImGuiCol_Text);
 
         float wrap_x = ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX();
         ImGui::PushTextWrapPos(wrap_x);
-        ImVec2 pos = ImGui::GetCursorScreenPos();
         ImGui::PushStyleColor(ImGuiCol_Text, text_color);
         ImGui::TextUnformatted(combined.c_str(),
                                 combined.c_str() + combined.size());
         ImGui::PopStyleColor();
         ImGui::PopTextWrapPos();
 
-        // Faux-bold overlay for bold ranges (first line only — sufficient
-        // since most bold spans are short inline phrases)
-        if (!bold_ranges.empty()) {
-            ImFont* font = ImGui::GetFont();
-            float fsize  = ImGui::GetFontSize();
-            ImU32 bold_col = ImGui::ColorConvertFloat4ToU32(
-                ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-            float wrap_w = wrap_x - pos.x;
-
-            for (auto& br : bold_ranges) {
-                // Compute x-offset of this bold range within the first line
-                float x_start = font->CalcTextSizeA(fsize, FLT_MAX, 0.0f,
-                    combined.c_str(), combined.c_str() + br.start).x;
-                // Only overlay if it's on the first line (within wrap width)
-                if (x_start < wrap_w) {
-                    ImGui::GetWindowDrawList()->AddText(
-                        font, fsize,
-                        ImVec2(pos.x + x_start + 1.0f, pos.y), bold_col,
-                        combined.c_str() + br.start,
-                        combined.c_str() + br.start + br.len,
-                        wrap_w - x_start);
-                }
-            }
-        }
     }
 };
 
@@ -295,7 +266,7 @@ static int md_leave_block(MD_BLOCKTYPE type, void* /*detail*/, void* userdata) {
 
     switch (type) {
         case MD_BLOCK_H:
-            // Render heading text as faux-bold in accent color
+            // Render heading text in accent color
             {
                 st->push_pending();
                 std::string combined;
@@ -306,9 +277,7 @@ static int md_leave_block(MD_BLOCKTYPE type, void* /*detail*/, void* userdata) {
                     ? ImVec4(0.55f, 0.75f, 1.0f, 1.0f)
                     : ImVec4(0.65f, 0.80f, 1.0f, 1.0f);
 
-                // Capture wrap width and position BEFORE rendering
                 float wrap_w = ImGui::GetContentRegionAvail().x;
-                ImVec2 pos = ImGui::GetCursorScreenPos();
 
                 ImGui::PushTextWrapPos(wrap_w + ImGui::GetCursorPosX());
                 ImGui::PushStyleColor(ImGuiCol_Text, hcolor);
@@ -316,14 +285,6 @@ static int md_leave_block(MD_BLOCKTYPE type, void* /*detail*/, void* userdata) {
                                         combined.c_str() + combined.size());
                 ImGui::PopStyleColor();
                 ImGui::PopTextWrapPos();
-
-                // Faux-bold overlay using the pre-captured wrap width
-                ImU32 hcol32 = ImGui::ColorConvertFloat4ToU32(hcolor);
-                ImGui::GetWindowDrawList()->AddText(
-                    ImGui::GetFont(), ImGui::GetFontSize(),
-                    ImVec2(pos.x + 1.0f, pos.y), hcol32,
-                    combined.c_str(), combined.c_str() + combined.size(),
-                    wrap_w);
             }
             st->heading = 0;
             ImGui::Spacing();
@@ -387,17 +348,10 @@ static int md_leave_block(MD_BLOCKTYPE type, void* /*detail*/, void* userdata) {
             st->segments.clear();
             if (!combined.empty()) {
                 ImVec4 white(1.0f, 1.0f, 1.0f, 1.0f);
-                ImVec2 pos = ImGui::GetCursorScreenPos();
                 ImGui::PushStyleColor(ImGuiCol_Text, white);
                 ImGui::TextUnformatted(combined.c_str(),
                                         combined.c_str() + combined.size());
                 ImGui::PopStyleColor();
-                // Faux-bold overlay
-                ImU32 col = ImGui::ColorConvertFloat4ToU32(white);
-                ImGui::GetWindowDrawList()->AddText(
-                    ImGui::GetFont(), ImGui::GetFontSize(),
-                    ImVec2(pos.x + 1.0f, pos.y), col,
-                    combined.c_str(), combined.c_str() + combined.size());
             }
             st->table_col++;
             break;
@@ -757,7 +711,9 @@ void ChatView::render_message(const ChatMessage& msg, size_t msg_idx) {
     }
 
     // Render content blocks
+    bool tool_summary_rendered = false;
     for (const auto& block : msg.content) {
+        if (tool_summary_rendered) break;
         switch (block.type) {
             case ContentBlock::Text:
                 if (is_user) {
@@ -788,14 +744,14 @@ void ChatView::render_message(const ChatMessage& msg, size_t msg_idx) {
                     render_tool_summary(msg, result_msg, msg_idx);
                 }
                 // Only render the summary once for all tool_use blocks
-                goto done_blocks;
+                tool_summary_rendered = true;
+                break;
 
             case ContentBlock::ToolResult:
                 // Should not appear in assistant messages
                 break;
         }
     }
-    done_blocks:
 
     ImGui::PopID();
     ImGui::Spacing();
@@ -924,10 +880,10 @@ void ChatView::render() {
     // --- Message area ---
     {
         // Update cache if conversation changed
-        size_t cur_size = client_->conversation().size();
-        if (cur_size != cached_size_) {
+        size_t cur_ver = client_->conversation().version();
+        if (cur_ver != cached_size_) {
             cached_messages_ = client_->conversation().snapshot();
-            cached_size_ = cur_size;
+            cached_size_ = cur_ver;
             scroll_to_bottom_ = true;
         }
 
@@ -974,8 +930,11 @@ void ChatView::render() {
             ImGui::PopStyleColor();
         }
 
-        // Auto-scroll to bottom when new messages arrive
-        if (scroll_to_bottom_) {
+        // Auto-scroll to bottom:
+        // - When new messages arrive (scroll_to_bottom_ flag)
+        // - Continuously while streaming (is_thinking), so growing
+        //   text stays visible as tokens arrive
+        if (scroll_to_bottom_ || client_->is_thinking()) {
             ImGui::SetScrollHereY(1.0f);
             scroll_to_bottom_ = false;
         }

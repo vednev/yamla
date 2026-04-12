@@ -244,8 +244,12 @@ void DetailView::render_inner() {
         ImGui::TextColored(ImVec4(1,0.3f,0.3f,1), "Cannot open file");
         return;
     }
-    ::pread(fd, buf.data(), rlen, static_cast<off_t>(offset));
+    ssize_t bytes_read = ::pread(fd, buf.data(), rlen, static_cast<off_t>(offset));
     ::close(fd);
+    if (bytes_read < 0 || static_cast<size_t>(bytes_read) != rlen) {
+        ImGui::TextColored(ImVec4(1,0.3f,0.3f,1), "Read error: expected %zu bytes, got %zd", rlen, bytes_read);
+        return;
+    }
 #endif
 
     simdjson::padded_string padded(buf.data(), rlen);

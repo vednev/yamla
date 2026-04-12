@@ -64,6 +64,9 @@ private:
     // Start async cluster load in a background thread
     void start_load(const std::vector<std::string>& paths);
 
+    // Append new files to the existing cluster (additive load)
+    void append_load(const std::vector<std::string>& paths);
+
     // Wired up to breakdown view filter changes
     void on_filter_changed();
 
