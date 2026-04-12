@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: completed
-last_updated: "2026-04-12T21:12:23.557Z"
+last_updated: "2026-04-12T21:16:10Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 11
-  completed_plans: 5
-  percent: 45
+  completed_plans: 6
+  percent: 54
 ---
 
 # Project State
@@ -27,8 +27,9 @@ progress:
 
 ## Current Phase
 
-Phase 3b: FTDC View UX Overhaul — Context gathered, ready for research + planning.
+Phase 3b: FTDC View UX Overhaul — Plan 03-06 complete (dashboard navigation panel).
 Resume file: None
+Stopped at: Completed 03-06-PLAN.md
 
 ## Decisions
 
@@ -40,6 +41,7 @@ Resume file: None
 - [Phase 03-ftdc-support]: Extracted all 18 FTDC files as-is from wip-ftdc (eeb3ee7) per D-01; FilterView as standalone class per D-02
 - [Phase 03]: zlib linked via pkg-config with -lz fallback; SRCS auto-detection already covers src/ftdc/*.cpp
 - [Phase 03b]: Dashboard-first navigation (D-12), toggle categories (D-13), anomaly badges (D-14/D-22), search overlay (D-15), collapsible chart groups (D-17), 12-15 curated dashboards (D-19)
+- [Phase 03b-06]: MetricTreeView rewritten as dashboard-first panel with 15 toggle cards, anomaly badges, search overlay
 
 ## Pending
 
@@ -47,4 +49,4 @@ Resume file: None
 
 ---
 
-*State updated: 2026-04-12*
+*State updated: 2026-04-12 (03-06 complete)*
