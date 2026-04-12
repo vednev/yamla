@@ -67,18 +67,20 @@ UnitDisplayConfig unit_display_config(const std::string& unit) {
 // ============================================================
 //  format_value_with_unit — shared formatting core.
 //  Writes a human-readable representation of `value` with the
-//  given unit into `buf`.  Used by both the ImPlot Y-axis
-//  formatter callback and the tooltip/stats formatter.
+//  given unit into `buf`.
 //
 //  `decimals`: 1 for axis ticks (compact), 2 for tooltips (precise).
+//  `show_unit`: false for Y-axis ticks (unit is in chart title),
+//               true for tooltips / stats rows.
 // ============================================================
 static int format_value_with_unit(double value, char* buf, int size,
-                                  const char* unit, int decimals)
+                                  const char* unit, int decimals,
+                                  bool show_unit)
 {
     size_t sz = static_cast<size_t>(size);
     if (value < 0.0) {
         char tmp[64];
-        format_value_with_unit(-value, tmp, sizeof(tmp), unit, decimals);
+        format_value_with_unit(-value, tmp, sizeof(tmp), unit, decimals, show_unit);
         return std::snprintf(buf, sz, "-%s", tmp);
     }
     if (value == 0.0)
@@ -86,117 +88,127 @@ static int format_value_with_unit(double value, char* buf, int size,
 
     std::string u(unit ? unit : "");
 
+    // Helper: append unit label only when show_unit is true.
+    // For axis ticks the unit is shown once in the chart title.
+    auto sfx = [&](const char* label) -> const char* {
+        return show_unit ? label : "";
+    };
+
     // ---- IEC byte sizes ----
     if (u == "bytes" || u == "bytes/s") {
-        const char* sfx = (u == "bytes/s") ? "/s" : "";
+        const char* rs = (u == "bytes/s" && show_unit) ? "/s" : "";
         if (value >= 1024.0 * 1024.0 * 1024.0)
-            return std::snprintf(buf, sz, "%.*f GB%s", decimals, value / (1024.0*1024.0*1024.0), sfx);
+            return std::snprintf(buf, sz, "%.*f%s%s", decimals, value / (1024.0*1024.0*1024.0), sfx(" GB"), rs);
         if (value >= 1024.0 * 1024.0)
-            return std::snprintf(buf, sz, "%.*f MB%s", decimals, value / (1024.0*1024.0), sfx);
+            return std::snprintf(buf, sz, "%.*f%s%s", decimals, value / (1024.0*1024.0), sfx(" MB"), rs);
         if (value >= 1024.0)
-            return std::snprintf(buf, sz, "%.*f KB%s", decimals, value / 1024.0, sfx);
-        return std::snprintf(buf, sz, "%.0f B%s", value, sfx);
+            return std::snprintf(buf, sz, "%.*f%s%s", decimals, value / 1024.0, sfx(" KB"), rs);
+        return std::snprintf(buf, sz, "%.0f%s%s", value, sfx(" B"), rs);
     }
 
     // ---- KB → MB → GB ----
     if (u == "KB") {
         if (value >= 1048576.0)
-            return std::snprintf(buf, sz, "%.*f GB", decimals, value / 1048576.0);
+            return std::snprintf(buf, sz, "%.*f%s", decimals, value / 1048576.0, sfx(" GB"));
         if (value >= 1024.0)
-            return std::snprintf(buf, sz, "%.*f MB", decimals, value / 1024.0);
-        return std::snprintf(buf, sz, "%.0f KB", value);
+            return std::snprintf(buf, sz, "%.*f%s", decimals, value / 1024.0, sfx(" MB"));
+        return std::snprintf(buf, sz, "%.0f%s", value, sfx(" KB"));
     }
     // ---- MB → GB ----
     if (u == "MB") {
         if (value >= 1024.0)
-            return std::snprintf(buf, sz, "%.*f GB", decimals, value / 1024.0);
-        return std::snprintf(buf, sz, "%.*f MB", decimals, value);
+            return std::snprintf(buf, sz, "%.*f%s", decimals, value / 1024.0, sfx(" GB"));
+        return std::snprintf(buf, sz, "%.*f%s", decimals, value, sfx(" MB"));
     }
 
     // ---- Milliseconds (duration): ms → s → min ----
     if (u == "ms") {
         if (value >= 60000.0)
-            return std::snprintf(buf, sz, "%.*f min", decimals, value / 60000.0);
+            return std::snprintf(buf, sz, "%.*f%s", decimals, value / 60000.0, sfx(" min"));
         if (value >= 1000.0)
-            return std::snprintf(buf, sz, "%.*f s", decimals, value / 1000.0);
-        return std::snprintf(buf, sz, "%.*f ms", decimals, value);
+            return std::snprintf(buf, sz, "%.*f%s", decimals, value / 1000.0, sfx(" s"));
+        return std::snprintf(buf, sz, "%.*f%s", decimals, value, sfx(" ms"));
     }
 
     // ---- Microseconds (latency): us → ms → s ----
     if (u == "us") {
         if (value >= 1000000.0)
-            return std::snprintf(buf, sz, "%.*f s", decimals, value / 1000000.0);
+            return std::snprintf(buf, sz, "%.*f%s", decimals, value / 1000000.0, sfx(" s"));
         if (value >= 1000.0)
-            return std::snprintf(buf, sz, "%.*f ms", decimals, value / 1000.0);
-        return std::snprintf(buf, sz, "%.0f us", value);
+            return std::snprintf(buf, sz, "%.*f%s", decimals, value / 1000.0, sfx(" ms"));
+        return std::snprintf(buf, sz, "%.0f%s", value, sfx(" us"));
     }
 
     // ---- Seconds (uptime): s → min → hr → d ----
     if (u == "s") {
         if (value >= 86400.0)
-            return std::snprintf(buf, sz, "%.*f d", decimals, value / 86400.0);
+            return std::snprintf(buf, sz, "%.*f%s", decimals, value / 86400.0, sfx(" d"));
         if (value >= 3600.0)
-            return std::snprintf(buf, sz, "%.*f hr", decimals, value / 3600.0);
+            return std::snprintf(buf, sz, "%.*f%s", decimals, value / 3600.0, sfx(" hr"));
         if (value >= 60.0)
-            return std::snprintf(buf, sz, "%.*f min", decimals, value / 60.0);
-        return std::snprintf(buf, sz, "%.*f s", decimals, value);
+            return std::snprintf(buf, sz, "%.*f%s", decimals, value / 60.0, sfx(" min"));
+        return std::snprintf(buf, sz, "%.*f%s", decimals, value, sfx(" s"));
     }
 
     // ---- Time-rates: ms/s and us/s ----
     // These mean "milliseconds (or microseconds) of X per second of wall
-    // time."  Scaling the time component (ms→s) produces nonsense like
-    // "seconds/second."  Instead, use SI prefixes on the raw number and
-    // keep the original unit label.
-    if (u == "ms/s") {
+    // time."  Use SI prefixes on the raw number; unit label is in the
+    // chart title for axis ticks.
+    if (u == "ms/s" || u == "us/s") {
+        const char* ulbl = (u == "ms/s") ? " ms/s" : " us/s";
         if (value >= 1000000.0)
-            return std::snprintf(buf, sz, "%.*fM ms/s", decimals, value / 1000000.0);
+            return std::snprintf(buf, sz, "%.*fM%s", decimals, value / 1000000.0, sfx(ulbl));
         if (value >= 1000.0)
-            return std::snprintf(buf, sz, "%.*fK ms/s", decimals, value / 1000.0);
-        return std::snprintf(buf, sz, "%.*f ms/s", decimals, value);
-    }
-    if (u == "us/s") {
-        if (value >= 1000000.0)
-            return std::snprintf(buf, sz, "%.*fM us/s", decimals, value / 1000000.0);
-        if (value >= 1000.0)
-            return std::snprintf(buf, sz, "%.*fK us/s", decimals, value / 1000.0);
-        return std::snprintf(buf, sz, "%.0f us/s", value);
+            return std::snprintf(buf, sz, "%.*fK%s", decimals, value / 1000.0, sfx(ulbl));
+        if (u == "us/s")
+            return std::snprintf(buf, sz, "%.0f%s", value, sfx(ulbl));
+        return std::snprintf(buf, sz, "%.*f%s", decimals, value, sfx(ulbl));
     }
 
     // ---- Percentage ----
     if (u == "%")
-        return std::snprintf(buf, sz, "%.*f%%", decimals, value);
+        return std::snprintf(buf, sz, "%.*f%s", decimals, value, sfx("%"));
 
     // ---- Generic SI suffixes for everything else (ops/s, count, etc.) ----
+    // For tooltips, append the unit after the number.
+    const char* unit_sfx = (show_unit && !u.empty()) ? u.c_str() : "";
+    char unit_buf[32] = {};
+    if (show_unit && !u.empty())
+        std::snprintf(unit_buf, sizeof(unit_buf), " %s", unit_sfx);
+
     if (value >= 1000000.0)
-        return std::snprintf(buf, sz, "%.*fM", decimals, value / 1000000.0);
+        return std::snprintf(buf, sz, "%.*fM%s", decimals, value / 1000000.0, unit_buf);
     if (value >= 1000.0)
-        return std::snprintf(buf, sz, "%.*fK", decimals, value / 1000.0);
+        return std::snprintf(buf, sz, "%.*fK%s", decimals, value / 1000.0, unit_buf);
     if (value < 1.0)
-        return std::snprintf(buf, sz, "%.2f", value);
+        return std::snprintf(buf, sz, "%.2f%s", value, unit_buf);
     // Integer-like values: avoid ".0" for clean tick labels
     if (value == std::floor(value) && value < 10000.0)
-        return std::snprintf(buf, sz, "%.0f", value);
-    return std::snprintf(buf, sz, "%.*f", decimals, value);
+        return std::snprintf(buf, sz, "%.0f%s", value, unit_buf);
+    return std::snprintf(buf, sz, "%.*f%s", decimals, value, unit_buf);
 }
 
 // ============================================================
 //  ImPlot Y-axis formatter callback.
 //  user_data points to a C string (the unit).
+//  show_unit=false — the unit is shown once in the chart title.
 // ============================================================
 static int y_axis_formatter(double value, char* buf, int size, void* user_data) {
     return format_value_with_unit(value, buf, size,
-                                  static_cast<const char*>(user_data), 1);
+                                  static_cast<const char*>(user_data),
+                                  1, false);
 }
 
 // ============================================================
 //  fmt_metric_value — public formatting for tooltips and stats.
-//  Uses 2 decimal places for precision.
+//  show_unit=true — include the unit for context.
 // ============================================================
 void ChartPanelView::fmt_metric_value(char* buf, size_t bufsz,
                                        double value, const std::string& unit)
 {
     format_value_with_unit(value, static_cast<char*>(buf),
-                           static_cast<int>(bufsz), unit.c_str(), 2);
+                           static_cast<int>(bufsz), unit.c_str(),
+                           2, true);
 }
 
 // ============================================================
@@ -493,9 +505,12 @@ void ChartPanelView::render_chart(const MetricSeries& series,
         if (y_hi <= y_lo) y_hi = y_lo * 10.0;
     }
 
-    // Chart title — no toggle buttons, just the metric name
+    // Chart title: metric name + unit (unit shown here, not on Y-axis ticks).
+    // Cumulative metrics already have rate units (ops/s, bytes/s) so no
+    // need to append /s again.
     std::string title = series.display_name;
-    if (use_rate) title += " (rate)";
+    if (!series.unit.empty())
+        title += "  (" + series.unit + ")";
 
     ImGui::PushID(series.path.c_str());
     ImGui::TextUnformatted(title.c_str());
