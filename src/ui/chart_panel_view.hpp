@@ -5,6 +5,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <functional>
+#include <utility>
 #include <cstdint>
 #include <cmath>
 
@@ -40,10 +41,20 @@ class ChartPanelView {
 public:
     using TimeClickCb = std::function<void(int64_t t_ms)>;
 
+    // Dashboard grouping info from MetricTreeView
+    using DashboardInfo = std::pair<std::string, std::vector<std::string>>;
+
     ChartPanelView() = default;
 
     void set_store(const MetricStore* store);
     void set_selected_metrics(const std::unordered_set<std::string>* sel);
+
+    // Set active dashboard groups for category rendering.
+    // Called by FtdcView whenever selection changes.
+    void set_dashboard_groups(const std::vector<DashboardInfo>* groups);
+
+    // Set custom (ungrouped) metric paths for the "Custom" group.
+    void set_custom_metrics(const std::unordered_set<std::string>* custom);
 
     // Cross-view linking: log entries for annotation markers
     // (may be null — annotations are skipped if not set)
@@ -80,6 +91,13 @@ private:
     const StringTable*                       log_strings_= nullptr;
     FilterState*                             filter_     = nullptr;
     TimeClickCb                              on_time_click_;
+
+    // Dashboard group data (owned by MetricTreeView, just pointing)
+    const std::vector<DashboardInfo>*        dashboard_groups_ = nullptr;
+    const std::unordered_set<std::string>*   custom_metrics_   = nullptr;
+
+    // Per-group collapsed state (keyed by dashboard name)
+    std::unordered_map<std::string, bool> group_collapsed_;
 
     // Per-metric chart state
     std::unordered_map<std::string, ChartState> chart_states_;

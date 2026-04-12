@@ -83,6 +83,14 @@ void ChartPanelView::set_filter(FilterState* filter) {
     filter_ = filter;
 }
 
+void ChartPanelView::set_dashboard_groups(const std::vector<DashboardInfo>* groups) {
+    dashboard_groups_ = groups;
+}
+
+void ChartPanelView::set_custom_metrics(const std::unordered_set<std::string>* custom) {
+    custom_metrics_ = custom;
+}
+
 // ============================================================
 //  render_minimap
 // ============================================================
@@ -501,22 +509,126 @@ void ChartPanelView::render_inner() {
         ImGui::Spacing();
     }
 
-    // Per-metric charts
+    // ---- Grouped chart rendering ----
     bool any_plot_hovered = false;
-    for (const auto& path : *selected_) {
-        const MetricSeries* ms = store_->get(path);
-        if (!ms || ms->empty()) continue;
 
-        // Get or create chart state with correct default
-        auto it = chart_states_.find(path);
-        if (it == chart_states_.end()) {
-            ChartState cs;
-            cs.show_rate = ms->is_cumulative;
-            it = chart_states_.emplace(path, cs).first;
+    // If we have dashboard groups, render charts by group
+    if (dashboard_groups_ && !dashboard_groups_->empty()) {
+        for (const auto& [group_name, group_paths] : *dashboard_groups_) {
+            if (group_paths.empty()) continue;
+
+            // Count how many metrics in this group actually have data
+            int data_count = 0;
+            for (const auto& path : group_paths) {
+                const MetricSeries* ms = store_->get(path);
+                if (ms && !ms->empty()) ++data_count;
+            }
+            if (data_count == 0) continue;
+
+            ImGui::PushID(group_name.c_str());
+
+            // Collapsed state for this group (default: expanded)
+            auto [it, inserted] = group_collapsed_.try_emplace(group_name, false);
+            bool& collapsed = it->second;
+
+            // Category header — styled as a collapsible section
+            ImGui::PushStyleColor(ImGuiCol_Header,        ImVec4(0.12f, 0.12f, 0.16f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_HeaderHovered,  ImVec4(0.18f, 0.18f, 0.24f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_HeaderActive,   ImVec4(0.15f, 0.15f, 0.20f, 1.0f));
+
+            // CollapsingHeader returns true when OPEN
+            bool header_open = ImGui::CollapsingHeader(group_name.c_str(),
+                collapsed ? ImGuiTreeNodeFlags_None : ImGuiTreeNodeFlags_DefaultOpen);
+            collapsed = !header_open;
+
+            ImGui::PopStyleColor(3);
+
+            if (header_open) {
+                // Render each chart in this group
+                for (const auto& path : group_paths) {
+                    const MetricSeries* ms = store_->get(path);
+                    if (!ms || ms->empty()) continue;
+
+                    auto cit = chart_states_.find(path);
+                    if (cit == chart_states_.end()) {
+                        ChartState cs;
+                        cs.show_rate = ms->is_cumulative;
+                        cit = chart_states_.emplace(path, cs).first;
+                    }
+
+                    render_chart(*ms, cit->second, avail_w - 8.0f, CHART_HEIGHT);
+                    if (!std::isnan(crosshair_x_)) any_plot_hovered = true;
+                }
+            }
+
+            ImGui::PopID();
+            ImGui::Spacing();
+        }
+    }
+
+    // Render "Custom" group for individually-selected metrics (per D-18)
+    if (custom_metrics_ && !custom_metrics_->empty()) {
+        int custom_data_count = 0;
+        for (const auto& path : *custom_metrics_) {
+            const MetricSeries* ms = store_->get(path);
+            if (ms && !ms->empty()) ++custom_data_count;
         }
 
-        render_chart(*ms, it->second, avail_w - 8.0f, CHART_HEIGHT);
-        if (!std::isnan(crosshair_x_)) any_plot_hovered = true;
+        if (custom_data_count > 0) {
+            ImGui::PushID("##custom_group");
+
+            auto [it, inserted] = group_collapsed_.try_emplace("Custom", false);
+            bool& collapsed = it->second;
+
+            ImGui::PushStyleColor(ImGuiCol_Header,        ImVec4(0.16f, 0.10f, 0.20f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_HeaderHovered,  ImVec4(0.22f, 0.14f, 0.28f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_HeaderActive,   ImVec4(0.18f, 0.12f, 0.24f, 1.0f));
+
+            bool header_open = ImGui::CollapsingHeader("Custom",
+                collapsed ? ImGuiTreeNodeFlags_None : ImGuiTreeNodeFlags_DefaultOpen);
+            collapsed = !header_open;
+
+            ImGui::PopStyleColor(3);
+
+            if (header_open) {
+                for (const auto& path : *custom_metrics_) {
+                    const MetricSeries* ms = store_->get(path);
+                    if (!ms || ms->empty()) continue;
+
+                    auto cit = chart_states_.find(path);
+                    if (cit == chart_states_.end()) {
+                        ChartState cs;
+                        cs.show_rate = ms->is_cumulative;
+                        cit = chart_states_.emplace(path, cs).first;
+                    }
+
+                    render_chart(*ms, cit->second, avail_w - 8.0f, CHART_HEIGHT);
+                    if (!std::isnan(crosshair_x_)) any_plot_hovered = true;
+                }
+            }
+
+            ImGui::PopID();
+            ImGui::Spacing();
+        }
+    }
+
+    // Fallback: if no groups are set, render flat (backward compat)
+    if ((!dashboard_groups_ || dashboard_groups_->empty()) &&
+        (!custom_metrics_ || custom_metrics_->empty())) {
+        for (const auto& path : *selected_) {
+            const MetricSeries* ms = store_->get(path);
+            if (!ms || ms->empty()) continue;
+
+            auto it = chart_states_.find(path);
+            if (it == chart_states_.end()) {
+                ChartState cs;
+                cs.show_rate = ms->is_cumulative;
+                it = chart_states_.emplace(path, cs).first;
+            }
+
+            render_chart(*ms, it->second, avail_w - 8.0f, CHART_HEIGHT);
+            if (!std::isnan(crosshair_x_)) any_plot_hovered = true;
+        }
     }
 
     // Apply drag-to-zoom after all charts have rendered
