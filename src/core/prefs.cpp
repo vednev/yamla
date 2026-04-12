@@ -1,4 +1,5 @@
 #include "prefs.hpp"
+#include "json_escape.hpp"
 
 #include <cstdio>
 #include <cstdlib>
@@ -24,22 +25,41 @@ Prefs PrefsManager::load() {
     FILE* f = std::fopen(path.c_str(), "r");
     if (!f) return p;  // file not found — use defaults
 
-    // Read whole file (it's tiny: ~40 bytes)
-    char buf[512] = {};
+    // Read whole file (it's tiny: ~200 bytes typically)
+    char buf[4096] = {};
     size_t n = std::fread(buf, 1, sizeof(buf) - 1, f);
     std::fclose(f);
     buf[n] = '\0';
 
-    // Parse "font":"..." — find key, read value
+    // Parse "font":"..." — find key, read value (handles escaped quotes)
     auto parse_str = [&](const char* key, std::string& out) {
         const char* pos = std::strstr(buf, key);
         if (!pos) return;
         pos = std::strchr(pos, ':');
         if (!pos) return;
-        while (*pos == ':' || *pos == ' ' || *pos == '"') ++pos;
-        const char* end = std::strchr(pos, '"');
-        if (!end) return;
-        out.assign(pos, end);
+        // Skip to opening quote
+        pos = std::strchr(pos, '"');
+        if (!pos) return;
+        ++pos; // skip the opening quote
+        // Read until unescaped closing quote
+        std::string result;
+        while (*pos && *pos != '"') {
+            if (*pos == '\\' && *(pos+1)) {
+                ++pos;
+                switch (*pos) {
+                    case '"':  result += '"';  break;
+                    case '\\': result += '\\'; break;
+                    case 'n':  result += '\n'; break;
+                    case 'r':  result += '\r'; break;
+                    case 't':  result += '\t'; break;
+                    default:   result += *pos; break;
+                }
+            } else {
+                result += *pos;
+            }
+            ++pos;
+        }
+        out = result;
     };
 
     auto parse_int = [&](const char* key, int& out) {
@@ -81,17 +101,12 @@ Prefs PrefsManager::load() {
 // ------------------------------------------------------------
 void PrefsManager::save(const Prefs& p) {
     std::string path = config_path();
-
-    // Ensure directory exists
     std::string dir = path.substr(0, path.rfind('/'));
 #if defined(_WIN32)
     _mkdir(dir.c_str());
 #else
     ::mkdir(dir.c_str(), 0755);
 #endif
-
-    // Check if this is initial creation (file doesn't exist yet)
-    bool is_new = (std::fopen(path.c_str(), "r") == nullptr);
 
     FILE* f = std::fopen(path.c_str(), "w");
     if (!f) return;
@@ -100,16 +115,14 @@ void PrefsManager::save(const Prefs& p) {
         "\"llm_key\":\"%s\",\"llm_endpoint\":\"%s\","
         "\"llm_model\":\"%s\",\"llm_maxtok\":%d,"
         "\"export_dir\":\"%s\"}\n",
-        p.font_name.c_str(), p.font_size, p.memory_limit_gb,
+        json_escape(p.font_name).c_str(), p.font_size, p.memory_limit_gb,
         p.prefer_checkboxes ? 1 : 0,
-        p.llm_api_key.c_str(), p.llm_endpoint.c_str(),
-        p.llm_model.c_str(), p.llm_max_tokens,
-        p.export_dir.c_str());
+        json_escape(p.llm_api_key).c_str(), json_escape(p.llm_endpoint).c_str(),
+        json_escape(p.llm_model).c_str(), p.llm_max_tokens,
+        json_escape(p.export_dir).c_str());
     std::fclose(f);
 
 #if !defined(_WIN32)
-    // Restrict permissions on initial creation — file contains API key
-    if (is_new)
-        ::chmod(path.c_str(), 0600);
+    ::chmod(path.c_str(), 0600);
 #endif
 }

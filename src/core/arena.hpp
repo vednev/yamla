@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cassert>
 #include <cstdlib>
+#include <cstdio>
 #include <new>
 
 // ------------------------------------------------------------
@@ -52,7 +53,11 @@ public:
     void* alloc(size_t size, size_t alignment = alignof(std::max_align_t)) {
         size_t aligned_pos = align_up(used_, alignment);
         size_t new_used    = aligned_pos + size;
-        assert(new_used <= capacity_ && "ArenaAllocator: slab exhausted");
+        if (new_used > capacity_) {
+            std::fprintf(stderr, "ArenaAllocator: slab exhausted (%zu requested, %zu remaining)\n",
+                         size, capacity_ - used_);
+            std::abort();
+        }
         used_ = new_used;
         return slab_ + aligned_pos;
     }

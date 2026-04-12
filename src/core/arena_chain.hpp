@@ -5,6 +5,7 @@
 #include <memory>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cassert>
 
 // ------------------------------------------------------------
@@ -41,7 +42,11 @@ public:
     // Allocate `size` bytes with `alignment`.
     // Grows into a new slab automatically on exhaustion.
     void* alloc(size_t size, size_t alignment = alignof(std::max_align_t)) {
-        assert(size <= SLAB_SIZE && "ArenaChain: single allocation exceeds slab size");
+        if (size > SLAB_SIZE) {
+            std::fprintf(stderr, "ArenaChain: allocation %zu exceeds slab size %zu\n",
+                         size, SLAB_SIZE);
+            std::abort();
+        }
         // Try current slab first
         if (current_->remaining() >= size + alignment) {
             return current_->alloc(size, alignment);
