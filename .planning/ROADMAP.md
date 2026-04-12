@@ -41,7 +41,7 @@ Plans:
 - [x] 03-01-PLAN.md — Extract FTDC core + UI source files from wip-ftdc branch
 - [x] 03-02-PLAN.md — Write Catch2 tests for FtdcParser and FtdcAnalyzer (TDD)
 - [x] 03-03-PLAN.md — App integration: tab bar, drop detection, cross-view linking
-- [ ] 03-04-PLAN.md — Build system (zlib), CI update, full build + test verification
+- [x] 03-04-PLAN.md — Build system (zlib), CI update, full build + test verification
 
 ---
 
