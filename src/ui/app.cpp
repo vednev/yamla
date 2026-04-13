@@ -398,7 +398,7 @@ bool App::init() {
 
     // --- Tabs -------------------------------------------------------
     style.Colors[ImGuiCol_Tab]               = black;
-    style.Colors[ImGuiCol_TabHovered]        = white;
+    style.Colors[ImGuiCol_TabHovered]        = ImVec4(0.18f, 0.18f, 0.18f, 1.00f);
     style.Colors[ImGuiCol_TabActive]         = mid_gray;
     style.Colors[ImGuiCol_TabUnfocused]      = black;
     style.Colors[ImGuiCol_TabUnfocusedActive]= mid_gray;
