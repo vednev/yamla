@@ -149,7 +149,7 @@ private:
     int layout_columns_ = 0;  // 0=auto, 1=list, 2/3/4=grid columns
 
     static constexpr float CHART_HEIGHT   = 140.0f;
-    static constexpr float MINIMAP_HEIGHT = 40.0f;
+    static constexpr float MINIMAP_HEIGHT = 56.0f;  // taller to fit time labels
     static constexpr float STATS_HEIGHT   = 18.0f;
     static constexpr size_t MAX_PLOT_PTS  = 2000;
 };

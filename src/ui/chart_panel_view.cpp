@@ -274,9 +274,10 @@ void ChartPanelView::render_minimap(float width, float height) {
         ImPlotFlags_NoBoxSelect | ImPlotFlags_NoMouseText |
         ImPlotFlags_NoFrame))
     {
-        // Setup axes
+        // Setup axes — X has time labels for orientation, Y is hidden
         ImPlot::SetupAxis(ImAxis_X1, nullptr,
-            ImPlotAxisFlags_NoDecorations | ImPlotAxisFlags_NoHighlight);
+            ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoHighlight);
+        ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Time);
         ImPlot::SetupAxis(ImAxis_Y1, nullptr,
             ImPlotAxisFlags_NoDecorations | ImPlotAxisFlags_NoHighlight |
             ImPlotAxisFlags_AutoFit);
@@ -744,13 +745,11 @@ void ChartPanelView::render_inner() {
         }
     }
 
-    // Minimap + reset button only shown when zoomed in
+    // Overview minimap — always visible for time orientation.
+    // Shows aggregate metric activity + time axis labels + zoom window highlight.
     bool zoomed = (x_view_min_ > x_min_ + 0.1 || x_view_max_ < x_max_ - 0.1);
-    if (zoomed) {
-        ImGui::TextDisabled("Overview");
-        render_minimap(avail_w - 8.0f, MINIMAP_HEIGHT);
-        ImGui::Spacing();
-    }
+    render_minimap(avail_w - 8.0f, MINIMAP_HEIGHT);
+    ImGui::Spacing();
 
     if (zoomed) {
         if (ImGui::SmallButton("Reset zoom")) {
