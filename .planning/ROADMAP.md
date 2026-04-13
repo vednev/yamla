@@ -73,8 +73,11 @@ Plans:
 
 **Depends on:** Phase 4
 
+**Plans:** 2 plans
+
 Plans:
-- [ ] TBD
+- [ ] 05-01-PLAN.md — Session struct extraction + tab bar UI + session-scoped rendering
+- [ ] 05-02-PLAN.md — Smart file drop routing + per-session LLM + build/test verification
 
 ### Phase 6: Empty State Welcome Screen
 
