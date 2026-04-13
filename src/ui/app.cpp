@@ -595,6 +595,15 @@ static bool is_ftdc_path(const std::string& path) {
 void App::handle_drop(const std::vector<std::string>& paths) {
     if (paths.empty()) return;
 
+    // D-60/D-59: Track all dropped paths as recent files
+    for (const auto& path : paths) {
+        auto& rf = prefs_.recent_files;
+        rf.erase(std::remove(rf.begin(), rf.end(), path), rf.end());
+        rf.insert(rf.begin(), path);
+        if (rf.size() > 10) rf.resize(10);
+    }
+    PrefsManager::save(prefs_);
+
     Session& s = active_session();
     bool is_ftdc = is_ftdc_path(paths[0]);
 
@@ -821,6 +830,112 @@ void App::render_menu_bar() {
 }
 
 // ------------------------------------------------------------
+//  render_welcome_screen — centered content for empty sessions
+// ------------------------------------------------------------
+void App::render_welcome_screen(float h) {
+    ImVec2 avail = ImGui::GetContentRegionAvail();
+    ImGui::BeginChild("##welcome", ImVec2(avail.x, h), false);
+
+    // Calculate vertical centering — estimate total content height
+    float line_h = ImGui::GetTextLineHeightWithSpacing();
+    float title_scale = 1.5f;
+    int recent_count = static_cast<int>(prefs_.recent_files.size());
+    float content_h = (line_h * title_scale)  // "YAMLA"
+                    + line_h                    // tagline
+                    + line_h * 2               // spacer
+                    + line_h                    // instructions
+                    + line_h                    // supported types
+                    + (recent_count > 0 ? line_h * 2 + line_h * recent_count : 0);
+    float start_y = std::max(0.0f, (h - content_h) * 0.5f);
+
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + start_y);
+
+    // ---- App name (D-56 item 1) ----
+    {
+        ImGui::SetWindowFontScale(title_scale);
+        const char* title = "YAMLA";
+        float tw = ImGui::CalcTextSize(title).x;
+        ImGui::SetCursorPosX((avail.x - tw) * 0.5f);
+        ImGui::TextUnformatted(title);
+        ImGui::SetWindowFontScale(1.0f);
+    }
+
+    // ---- Tagline (D-56 item 2) ----
+    {
+        const char* tagline = "Yet Another MongoDB Log Analyzer";
+        float tw = ImGui::CalcTextSize(tagline).x;
+        ImGui::SetCursorPosX((avail.x - tw) * 0.5f);
+        ImGui::TextDisabled("%s", tagline);
+    }
+
+    // ---- Spacer (D-56 item 3) ----
+    ImGui::Dummy(ImVec2(0, line_h * 2));
+
+    // ---- Instructions (D-56 item 4) ----
+    {
+        const char* instr = "Drag files onto this window to get started";
+        float tw = ImGui::CalcTextSize(instr).x;
+        ImGui::SetCursorPosX((avail.x - tw) * 0.5f);
+        ImGui::TextUnformatted(instr);
+    }
+
+    // ---- Supported types (D-56 item 5) ----
+    {
+        const char* types = "Supported: MongoDB log files (.log, .json) and FTDC diagnostic.data directories";
+        float tw = ImGui::CalcTextSize(types).x;
+        ImGui::SetCursorPosX((avail.x - tw) * 0.5f);
+        ImGui::TextDisabled("%s", types);
+    }
+
+    // ---- Recent files section (D-56 item 7, D-57, D-61) ----
+    if (!prefs_.recent_files.empty()) {
+        ImGui::Dummy(ImVec2(0, line_h * 2));
+
+        const char* header = "Recent Files";
+        float hw = ImGui::CalcTextSize(header).x;
+        ImGui::SetCursorPosX((avail.x - hw) * 0.5f);
+        ImGui::TextUnformatted(header);
+
+        ImGui::Spacing();
+
+        for (int i = 0; i < static_cast<int>(prefs_.recent_files.size()); ++i) {
+            const auto& full_path = prefs_.recent_files[i];
+
+            // D-61: Display only filename, full path as tooltip
+            std::string display_name = full_path;
+            auto slash_pos = full_path.rfind('/');
+            if (slash_pos != std::string::npos && slash_pos + 1 < full_path.size())
+                display_name = full_path.substr(slash_pos + 1);
+#if defined(_WIN32)
+            auto bslash_pos = full_path.rfind('\\');
+            if (bslash_pos != std::string::npos &&
+                (slash_pos == std::string::npos || bslash_pos > slash_pos))
+                display_name = full_path.substr(bslash_pos + 1);
+#endif
+
+            float dw = ImGui::CalcTextSize(display_name.c_str()).x;
+            ImGui::SetCursorPosX((avail.x - dw) * 0.5f);
+
+            ImGui::PushID(i);
+            // D-57: Clickable — use Selectable for hover highlight
+            if (ImGui::Selectable(display_name.c_str(), false,
+                                  ImGuiSelectableFlags_None,
+                                  ImVec2(dw, 0))) {
+                // Load the file into current session
+                handle_drop({full_path});
+            }
+            // D-61: Full path as tooltip on hover
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", full_path.c_str());
+            }
+            ImGui::PopID();
+        }
+    }
+
+    ImGui::EndChild();
+}
+
+// ------------------------------------------------------------
 //  render_dockspace — manual full-screen host window
 // ------------------------------------------------------------
 void App::render_dockspace() {
@@ -903,17 +1018,20 @@ void App::render_dockspace() {
     ImVec2 avail = ImGui::GetContentRegionAvail();
     float h = avail.y;
 
-    if (!show_tab_bar || s.active_tab == 0) {
+    // D-54: Check if session has ANY data loaded
+    bool has_log  = s.cluster && s.cluster->state() == LoadState::Ready;
+    bool has_ftdc = s.ftdc_view.load_state() != FtdcLoadState::Idle;
+
+    if (!has_log && !has_ftdc) {
+        // D-54/D-55: No data — show welcome screen instead of 3-column layout
+        render_welcome_screen(h);
+    } else if (!show_tab_bar || s.active_tab == 0) {
         // ---- Logs tab: existing three-column layout ----
         float vsplitter_w = 6.0f; // vertical (left-column-width) splitter
 
         // ---- Left column — single unified scrollable filter panel ----
-        bool has_data = s.cluster && s.cluster->state() == LoadState::Ready;
         ImGui::BeginChild("##left_col", ImVec2(left_w_, h), true);
-        if (has_data)
-            s.breakdown_view.render();
-        else
-            ImGui::TextDisabled("Drop MongoDB log files here to begin.");
+        s.breakdown_view.render();
         ImGui::EndChild();
 
         // Splitter between left column and log view (controls left_w_)
