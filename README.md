@@ -1,12 +1,11 @@
 # YAMLA
 
 Yet Another MongoDB Log Analyzer. Fast, and intended for
-inspecting and filtering MongoDB 5.4+ structured JSON logs with a built-in chat + AI agent to analyze them. It is heavily vibe coded. Proceed with caution!
+inspecting and filtering MongoDB 5.4+ structured JSON logs **and FTDC diagnostic data files** with a built-in chat + AI agent to analyze them. It is heavily vibe coded. Proceed with caution!
 
-> **Supported log type:** `mongod` server logs only.
+> **Supported data types:** `mongod` server logs (JSON format) and FTDC `diagnostic.data` metric files.
 > YAMLA does not currently support MongoDB Agent logs, Ops Manager logs,
-> `mongos` router logs, or FTDC diagnostic data files (FTDC is WIP on a separate
-> branch)
+> or `mongos` router logs.
 
 ## Releases
 
@@ -74,9 +73,10 @@ make run
 ./yamla
 ```
 
-The app opens at 1920×1080. Drag one or more MongoDB log files onto the window
-to load them. Multiple files are treated as a single replica-set cluster and
-merged by timestamp.
+The app opens at 1920×1080. Drag one or more MongoDB log files or an FTDC
+`diagnostic.data` directory onto the window to load them. Log files are treated
+as a single replica-set cluster and merged by timestamp. FTDC directories are
+parsed and displayed as time-series metric charts in a separate tab.
 
 ## Fonts
 
@@ -94,6 +94,7 @@ Font and size are changed via **Edit → Preferences…** and persist to
 
 ## Features
 
+### Log Analysis
 - Virtual-scroll log list — handles millions of entries without lag
 - Click any row to inspect the full entry as a collapsible JSON tree
 - Breakdown bar charts and tables: severity, op type, component, driver,
@@ -106,6 +107,24 @@ Font and size are changed via **Edit → Preferences…** and persist to
   version of a deduplicated log entry
 - Timestamp column sorting (click the header to toggle ascending/descending)
 - Built-in AI assistant for log analysis (see below)
+
+### FTDC Metric Visualization
+- Drag a `diagnostic.data` directory to visualize FTDC metrics
+- 15 curated dashboard categories: Overview, CPU, Memory, WiredTiger Cache,
+  Eviction, Tickets, Operations, Checkpoints, Replication, Network, Disk I/O,
+  Journal, History Store, Cursors, Transactions
+- Dashboard-first navigation with toggle cards and anomaly status badges
+- LTTB downsampling for smooth rendering of large time-series datasets
+- Synchronized crosshair across all charts
+- Anomaly threshold bands highlighting when metrics exceed safe limits
+- Collapsible category groups for chart organization
+- List/Grid layout toggle with 2/3/4-column grid mode for side-by-side comparison
+- Always-visible overview minimap with time axis labels
+- Drag-to-zoom and Ctrl+Scroll zoom on chart time axis
+- Log event annotation markers on FTDC charts (when both logs and FTDC are loaded)
+- Bidirectional time-range linking: click a chart time point to filter log entries to ±30s
+- Search overlay for discovering individual metrics not in preset dashboards
+- Unit-aware Y-axis display following Grafana/PMM conventions
 
 ## AI Assistant
 
@@ -146,7 +165,11 @@ git push origin v0.1.0
 
 GitHub Actions builds all three binaries natively and publishes the release automatically.
 
-## MongoDB log format
+## Supported formats
 
-Requires MongoDB 4.4+ structured JSON log format (one JSON object per line).
+**MongoDB logs:** Requires MongoDB 4.4+ structured JSON log format (one JSON object per line).
 Legacy text logs are not supported.
+
+**FTDC data:** Drag a `diagnostic.data` directory (containing `metrics.*` files) onto the
+window. YAMLA parses the BSON/zlib-compressed FTDC binary format and displays all metrics
+as time-series charts. Both regular and interim metric files are supported.
