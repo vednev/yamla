@@ -31,10 +31,63 @@ struct ID3D11RenderTargetView;
 #include "ftdc_view.hpp"
 
 // ------------------------------------------------------------
+//  Session — one independent analysis session
+//
+//  Each session owns its own log data, FTDC data, views,
+//  filters, chat, and LLM client. Multiple sessions live
+//  in App::sessions_ as independent tabs.
+// ------------------------------------------------------------
+struct Session {
+    // Data
+    std::unique_ptr<Cluster>    cluster;
+    std::thread                 load_thread;
+
+    // UI state
+    FilterState     filter;
+    LogView         log_view;
+    DetailView      detail_view;
+    BreakdownView   breakdown_view;
+
+    // LLM chat integration
+    LlmClient       llm_client;
+    ChatView         chat_view;
+
+    // FTDC view
+    FtdcView        ftdc_view;
+
+    // Inner tab: 0 = Logs, 1 = FTDC
+    int  active_tab       = 0;
+    bool force_tab_switch = false;
+
+    // Flat pointer list for FTDC annotation markers
+    std::vector<const LogEntry*> log_entry_ptrs;
+
+    // Load state tracking
+    LoadState last_cluster_state = LoadState::Idle;
+    bool      sample_mode             = false;
+    float     sample_ratio            = 1.0f;
+    bool      sample_notice_dismissed = false;
+    size_t    total_file_bytes = 0;
+    double    load_duration_s  = 0.0;
+    std::chrono::steady_clock::time_point load_start;
+
+    // Tab title (computed from loaded filenames)
+    std::string title = "New Session";
+    bool        open  = true;  // false when user clicks close (after confirm)
+
+    // Non-copyable (owns threads)
+    Session() = default;
+    ~Session();
+    Session(const Session&)            = delete;
+    Session& operator=(const Session&) = delete;
+};
+
+// ------------------------------------------------------------
 //  App
 //
 //  Owns the SDL2 window, OpenGL context, ImGui/ImPlot state,
-//  and orchestrates all UI panels.
+//  and orchestrates all UI panels. Holds multiple sessions as
+//  independent tabs.
 // ------------------------------------------------------------
 class App {
 public:
@@ -71,6 +124,15 @@ private:
     // Wired up to breakdown view filter changes
     void on_filter_changed();
 
+    // Session lifecycle
+    Session& active_session();
+    void create_session();          // creates empty session, wires callbacks
+    void close_session(int idx);    // removes session, adjusts active index
+    void wire_session(Session& s);  // sets up callbacks and shared state
+
+    // Compute tab title from loaded data (D-41)
+    static std::string compute_tab_title(const Session& s);
+
     // SDL window — always present
     SDL_Window*   window_  = nullptr;
 
@@ -90,55 +152,27 @@ private:
     SDL_GLContext gl_ctx_  = nullptr;
 #endif
 
-    // Data
-    std::unique_ptr<Cluster>    cluster_;
-    std::thread                 load_thread_;
-
-    // UI state
-    FilterState     filter_;
-    LogView         log_view_;
-    DetailView      detail_view_;
-    BreakdownView   breakdown_view_;
+    // Shared UI state (D-38: stays in App, not per-session)
     FontManager     font_mgr_;
     PrefsView       prefs_view_;
     Prefs           prefs_;
 
-    // node_files_ removed — mmaps are dropped after parsing; detail view
-    // re-opens files on demand via pread.
+    bool      running_ = true;
 
-    bool      running_            = true;
-    LoadState last_cluster_state_ = LoadState::Idle;
-    bool      sample_mode_              = false;  // true when file exceeded memory budget
-    float     sample_ratio_             = 1.0f;   // fraction of entries loaded (1.0 = full)
-    bool      sample_notice_dismissed_  = false;  // user dismissed the sample popup
-
-    // Panel dimensions — all user-draggable
+    // Panel dimensions — all user-draggable, shared across sessions (D-39)
     float right_w_ = 420.0f;  // right (detail) panel width
     float left_w_  = 280.0f;  // left column width
-
-    // Load statistics displayed in the menu bar
-    size_t total_file_bytes_ = 0;
-    double load_duration_s_  = 0.0;
-    std::chrono::steady_clock::time_point load_start_;
 
     // Pending drag-and-drop file paths (accumulated between SDL_DROPFILE
     // and SDL_DROPCOMPLETE events)
     std::vector<std::string> pending_drops_;
 
-    // LLM chat integration
-    LlmClient   llm_client_;
-    ChatView     chat_view_;
-    std::string  knowledge_text_;   // loaded from knowledge/ at startup
+    // Sessions (D-37, D-38)
+    std::vector<std::unique_ptr<Session>> sessions_;
+    int active_session_idx_ = 0;
 
-    // FTDC view
-    FtdcView    ftdc_view_;
-
-    // Active tab: 0 = Logs, 1 = FTDC
-    int  active_tab_       = 0;
-    bool force_tab_switch_ = false; // one-shot flag for programmatic tab switch
-
-    // Flat pointer list for FTDC annotation markers (rebuilt on log load)
-    std::vector<const LogEntry*> log_entry_ptrs_;
+    // Knowledge text loaded once at startup, passed to each session's LlmClient (D-48)
+    std::string knowledge_text_;
 
     void load_knowledge();          // reads knowledge/*.md into knowledge_text_
     void setup_llm();               // configure client after prefs load

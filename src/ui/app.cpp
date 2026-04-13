@@ -88,36 +88,19 @@ static ID3D11RenderTargetView* create_dx11_rtv(IDXGISwapChain*  swapchain,
 // See compute_arena_budget() in start_load().
 
 // ------------------------------------------------------------
+//  Session destructor
+// ------------------------------------------------------------
+Session::~Session() {
+    if (load_thread.joinable()) load_thread.join();
+    llm_client.cancel_and_join();
+    cluster.reset();
+}
+
+// ------------------------------------------------------------
 //  Constructor / Destructor
 // ------------------------------------------------------------
 
 App::App() {
-    log_view_.set_filter(&filter_);
-    log_view_.set_on_select([this](size_t idx, uint16_t node_idx) {
-        if (!cluster_ || cluster_->state() != LoadState::Ready) return;
-        const LogEntry& e = cluster_->entries()[idx];
-        const auto& nodes = cluster_->nodes();
-        if (node_idx >= nodes.size()) return;
-
-        // For stacked entries, look up the raw position for the selected node.
-        // This uses the dedup_alts_ map if the selected node isn't the primary.
-        uint64_t offset = e.raw_offset;
-        uint32_t len    = e.raw_len;
-        cluster_->get_node_raw(idx, node_idx, offset, len);
-
-        const std::string& path = nodes[node_idx].path;
-        detail_view_.set_entry(&e, path, &cluster_->strings(),
-                               offset, len);
-        // Also update LLM tools with the selected entry
-        llm_client_.tools().set_selected_entry(&e, path);
-    });
-
-    breakdown_view_.set_filter(&filter_);
-    breakdown_view_.set_on_filter_changed([this] { on_filter_changed(); });
-    breakdown_view_.set_prefs(&prefs_);
-
-    ftdc_view_.set_filter(&filter_);
-
     prefs_view_.set_prefs(&prefs_);
     prefs_view_.set_on_changed([this](const Prefs& p) {
         prefs_ = p;
@@ -127,16 +110,99 @@ App::App() {
         setup_llm();
     });
 
-    // Wire chat view
-    chat_view_.set_llm_client(&llm_client_);
-    chat_view_.set_prefs(&prefs_);
+    create_session();  // start with one empty session
 }
 
 App::~App() {
-    if (load_thread_.joinable()) load_thread_.join();
-    llm_client_.cancel_and_join();  // Stop LLM thread BEFORE destroying cluster
-    cluster_.reset();
+    sessions_.clear();  // Session destructors handle thread joining
     shutdown();
+}
+
+// ------------------------------------------------------------
+//  Session lifecycle helpers
+// ------------------------------------------------------------
+
+Session& App::active_session() {
+    // Bounds-check (T-05-01)
+    if (active_session_idx_ < 0)
+        active_session_idx_ = 0;
+    if (active_session_idx_ >= static_cast<int>(sessions_.size()))
+        active_session_idx_ = static_cast<int>(sessions_.size()) - 1;
+    return *sessions_[active_session_idx_];
+}
+
+void App::create_session() {
+    auto s = std::make_unique<Session>();
+    wire_session(*s);
+    sessions_.push_back(std::move(s));
+    active_session_idx_ = static_cast<int>(sessions_.size()) - 1;
+}
+
+void App::wire_session(Session& s) {
+    s.log_view.set_filter(&s.filter);
+    s.log_view.set_on_select([&s](size_t idx, uint16_t node_idx) {
+        if (!s.cluster || s.cluster->state() != LoadState::Ready) return;
+        const LogEntry& e = s.cluster->entries()[idx];
+        const auto& nodes = s.cluster->nodes();
+        if (node_idx >= nodes.size()) return;
+
+        uint64_t offset = e.raw_offset;
+        uint32_t len    = e.raw_len;
+        s.cluster->get_node_raw(idx, node_idx, offset, len);
+
+        const std::string& path = nodes[node_idx].path;
+        s.detail_view.set_entry(&e, path, &s.cluster->strings(),
+                                offset, len);
+        s.llm_client.tools().set_selected_entry(&e, path);
+    });
+
+    s.breakdown_view.set_filter(&s.filter);
+    s.breakdown_view.set_on_filter_changed([&s] { s.log_view.rebuild_filter_index(); });
+    s.breakdown_view.set_prefs(&prefs_);
+
+    s.ftdc_view.set_filter(&s.filter);
+
+    s.chat_view.set_llm_client(&s.llm_client);
+    s.chat_view.set_prefs(&prefs_);
+}
+
+void App::close_session(int idx) {
+    if (idx < 0 || idx >= static_cast<int>(sessions_.size())) return;
+    sessions_.erase(sessions_.begin() + idx);
+    if (sessions_.empty()) {
+        create_session();  // always have at least one tab
+        active_session_idx_ = 0;
+    } else if (active_session_idx_ >= static_cast<int>(sessions_.size())) {
+        active_session_idx_ = static_cast<int>(sessions_.size()) - 1;
+    } else if (active_session_idx_ > idx) {
+        active_session_idx_--;
+    }
+}
+
+std::string App::compute_tab_title(const Session& s) {
+    bool has_log  = s.cluster && s.cluster->state() == LoadState::Ready;
+    bool has_ftdc = s.ftdc_view.load_state() == FtdcLoadState::Ready;
+    if (has_log && has_ftdc) {
+        const auto& nodes = s.cluster->nodes();
+        std::string log_name = "log";
+        if (!nodes.empty()) {
+            const auto& p = nodes[0].path;
+            auto pos = p.find_last_of("/\\");
+            log_name = (pos != std::string::npos) ? p.substr(pos + 1) : p;
+        }
+        return log_name + " + FTDC";
+    }
+    if (has_log) {
+        const auto& nodes = s.cluster->nodes();
+        if (!nodes.empty()) {
+            const auto& p = nodes[0].path;
+            auto pos = p.find_last_of("/\\");
+            return (pos != std::string::npos) ? p.substr(pos + 1) : p;
+        }
+        return "Log";
+    }
+    if (has_ftdc) return "FTDC";
+    return "New Session";
 }
 
 // ------------------------------------------------------------
@@ -471,11 +537,9 @@ void App::load_knowledge() {
 }
 
 // ------------------------------------------------------------
-//  setup_llm — configure the LLM client
+//  setup_llm — configure LLM clients for ALL sessions
 // ------------------------------------------------------------
 void App::setup_llm() {
-    llm_client_.set_prefs(&prefs_);
-
     // Build system prompt: persona + knowledge
     std::string system;
     system += "You are a MongoDB log analysis assistant integrated into YAMLA "
@@ -491,7 +555,11 @@ void App::setup_llm() {
               "for readability.\n\n"
               "--- MONGODB LOG KNOWLEDGE BASE ---\n\n";
     system += knowledge_text_;
-    llm_client_.set_system_prompt(system);
+
+    for (auto& sp : sessions_) {
+        sp->llm_client.set_prefs(&prefs_);
+        sp->llm_client.set_system_prompt(system);
+    }
 }
 
 // Detect if a dropped path is FTDC data (diagnostic.data dir or metrics.* file)
@@ -509,31 +577,29 @@ static bool is_ftdc_path(const std::string& path) {
 }
 
 // ------------------------------------------------------------
-//  handle_drop
+//  handle_drop — routes to active session
 // ------------------------------------------------------------
 void App::handle_drop(const std::vector<std::string>& paths) {
     if (paths.empty()) return;
+    Session& s = active_session();
 
     // Auto-detect FTDC data: route to FTDC view
     if (is_ftdc_path(paths[0])) {
-        ftdc_view_.start_load(paths[0]);
-        active_tab_ = 1;
-        force_tab_switch_ = true;
+        s.ftdc_view.start_load(paths[0]);
+        s.active_tab = 1;
+        s.force_tab_switch = true;
         return;
     }
 
-    if (load_thread_.joinable()) load_thread_.join();
+    if (s.load_thread.joinable()) s.load_thread.join();
 
     // If LLM is currently thinking, wait for it to finish before
     // mutating cluster data. This prevents data races.
-    if (llm_client_.is_thinking()) {
-        // Queue the paths for later — we'll check in render_frame
-        // For now, just block the LLM and proceed
-        // Actually, the simplest safe approach: just don't append while thinking
+    if (s.llm_client.is_thinking()) {
         // Fall through to start_load which creates a new cluster
     }
 
-    if (cluster_ && cluster_->state() == LoadState::Ready && !llm_client_.is_thinking()) {
+    if (s.cluster && s.cluster->state() == LoadState::Ready && !s.llm_client.is_thinking()) {
         append_load(paths);
     } else {
         start_load(paths);
@@ -541,22 +607,24 @@ void App::handle_drop(const std::vector<std::string>& paths) {
 }
 
 void App::start_load(const std::vector<std::string>& paths) {
+    Session& s = active_session();
+
     // Reset all UI state that holds raw pointers into the old cluster/arena.
-    // This must happen BEFORE cluster_ is destroyed (below) so no render
+    // This must happen BEFORE cluster is destroyed (below) so no render
     // frame can access dangling pointers between destruction and the new
     // cluster becoming ready.
-    filter_.clear();
-    detail_view_.set_entry(nullptr, std::string{}, nullptr);
-    log_view_.set_entries(nullptr, nullptr, nullptr);
-    breakdown_view_.set_analysis(nullptr, nullptr);
-    breakdown_view_.set_nodes(nullptr);
-    total_file_bytes_   = 0;
-    load_duration_s_    = 0.0;
-    sample_mode_             = false;
-    sample_ratio_            = 1.0f;
-    sample_notice_dismissed_ = false;
-    last_cluster_state_ = LoadState::Idle;
-    load_start_         = std::chrono::steady_clock::now();
+    s.filter.clear();
+    s.detail_view.set_entry(nullptr, std::string{}, nullptr);
+    s.log_view.set_entries(nullptr, nullptr, nullptr);
+    s.breakdown_view.set_analysis(nullptr, nullptr);
+    s.breakdown_view.set_nodes(nullptr);
+    s.total_file_bytes   = 0;
+    s.load_duration_s    = 0.0;
+    s.sample_mode             = false;
+    s.sample_ratio            = 1.0f;
+    s.sample_notice_dismissed = false;
+    s.last_cluster_state = LoadState::Idle;
+    s.load_start         = std::chrono::steady_clock::now();
 
     // Measure total file size (stat only — don't mmap yet)
     size_t total_bytes = 0;
@@ -569,7 +637,7 @@ void App::start_load(const std::vector<std::string>& paths) {
             std::fprintf(stderr, "Cannot open %s: %s\n", p.c_str(), ex.what());
         }
     }
-    total_file_bytes_ = total_bytes;
+    s.total_file_bytes = total_bytes;
 
     // ---- Compute memory budget --------------------------------
     // Budget = min(user_limit, 60% of total RAM), at least 256 MB.
@@ -590,43 +658,45 @@ void App::start_load(const std::vector<std::string>& paths) {
 
     size_t needed = std::max(MIN_ARENA, static_cast<size_t>(total_bytes * 1.5));
 
-    sample_mode_  = (needed > budget);
-    sample_ratio_ = sample_mode_
-                    ? static_cast<float>(budget) / static_cast<float>(needed)
-                    : 1.0f;
+    s.sample_mode  = (needed > budget);
+    s.sample_ratio = s.sample_mode
+                     ? static_cast<float>(budget) / static_cast<float>(needed)
+                     : 1.0f;
 
     // Cluster uses ArenaChain internally — no upfront arena size needed.
     // Budget is communicated via sample_ratio.
     (void)needed; // used only to compute sample_ratio above
 
-    cluster_ = std::make_unique<Cluster>();
-    cluster_->set_sample_ratio(sample_ratio_);
+    s.cluster = std::make_unique<Cluster>();
+    s.cluster->set_sample_ratio(s.sample_ratio);
     for (const auto& p : paths)
-        cluster_->add_file(p);
+        s.cluster->add_file(p);
 
-    load_thread_ = std::thread([this] { cluster_->load(); });
+    s.load_thread = std::thread([&s] { s.cluster->load(); });
 }
 
 // ------------------------------------------------------------
 //  append_load — add files to an already-loaded cluster
 // ------------------------------------------------------------
 void App::append_load(const std::vector<std::string>& paths) {
+    Session& s = active_session();
+
     // Clear view pointers — entries will be re-sorted so all indices
     // become invalid. The views will be re-wired when state transitions
     // back to Ready in render_frame().
-    filter_.clear();
-    detail_view_.set_entry(nullptr, std::string{}, nullptr);
-    log_view_.set_entries(nullptr, nullptr, nullptr);
-    breakdown_view_.set_analysis(nullptr, nullptr);
-    breakdown_view_.set_nodes(nullptr);
-    last_cluster_state_ = LoadState::Idle;
-    load_start_         = std::chrono::steady_clock::now();
+    s.filter.clear();
+    s.detail_view.set_entry(nullptr, std::string{}, nullptr);
+    s.log_view.set_entries(nullptr, nullptr, nullptr);
+    s.breakdown_view.set_analysis(nullptr, nullptr);
+    s.breakdown_view.set_nodes(nullptr);
+    s.last_cluster_state = LoadState::Idle;
+    s.load_start         = std::chrono::steady_clock::now();
 
     // Accumulate total file bytes (existing + new)
     for (const auto& p : paths) {
         try {
             MmapFile f(p);
-            total_file_bytes_ += f.size();
+            s.total_file_bytes += f.size();
         } catch (const std::exception& ex) {
             std::fprintf(stderr, "Cannot open %s: %s\n", p.c_str(), ex.what());
         }
@@ -634,8 +704,8 @@ void App::append_load(const std::vector<std::string>& paths) {
 
     // Capture the paths for the background thread
     std::vector<std::string> new_paths = paths;
-    load_thread_ = std::thread([this, new_paths = std::move(new_paths)] {
-        cluster_->append_files(new_paths);
+    s.load_thread = std::thread([&s, new_paths = std::move(new_paths)] {
+        s.cluster->append_files(new_paths);
     });
 }
 
@@ -643,7 +713,7 @@ void App::append_load(const std::vector<std::string>& paths) {
 //  on_filter_changed
 // ------------------------------------------------------------
 void App::on_filter_changed() {
-    log_view_.rebuild_filter_index();
+    active_session().log_view.rebuild_filter_index();
 }
 
 // ------------------------------------------------------------
@@ -663,36 +733,37 @@ void App::render_menu_bar() {
         }
         if (ImGui::BeginMenu("Help")) {
             if (ImGui::MenuItem("AI Assistant", "Ctrl+A"))
-                chat_view_.toggle();
+                active_session().chat_view.toggle();
             ImGui::EndMenu();
         }
 
-        // Show load status — right-aligned, gray tone
+        // Show load status — right-aligned, gray tone (for active session)
         {
+            Session& s = active_session();
             const ImVec4 stat_color = ImVec4(0.55f, 0.55f, 0.55f, 1.0f);
             char stat_buf[128] = {};
 
-            if (cluster_) {
-                switch (cluster_->state()) {
+            if (s.cluster) {
+                switch (s.cluster->state()) {
                     case LoadState::Loading:
                         std::snprintf(stat_buf, sizeof(stat_buf), "Loading...");
                         break;
                     case LoadState::Ready: {
                         char size_buf[32];
-                        if (total_file_bytes_ >= 1024ull * 1024 * 1024)
+                        if (s.total_file_bytes >= 1024ull * 1024 * 1024)
                             std::snprintf(size_buf, sizeof(size_buf), "%.2f GB",
-                                static_cast<double>(total_file_bytes_) / (1024.0*1024.0*1024.0));
+                                static_cast<double>(s.total_file_bytes) / (1024.0*1024.0*1024.0));
                         else
                             std::snprintf(size_buf, sizeof(size_buf), "%.1f MB",
-                                static_cast<double>(total_file_bytes_) / (1024.0*1024.0));
+                                static_cast<double>(s.total_file_bytes) / (1024.0*1024.0));
                         std::snprintf(stat_buf, sizeof(stat_buf),
                             "%zu entries  |  %s  |  %.2fs",
-                            cluster_->entries().size(), size_buf, load_duration_s_);
+                            s.cluster->entries().size(), size_buf, s.load_duration_s);
                         break;
                     }
                     case LoadState::Error:
                         std::snprintf(stat_buf, sizeof(stat_buf),
-                            "Error: %s", cluster_->error().c_str());
+                            "Error: %s", s.cluster->error().c_str());
                         break;
                     default:
                         break;
@@ -732,23 +803,26 @@ void App::render_dockspace() {
     ImGui::Begin("##host", nullptr, host_flags);
     ImGui::PopStyleVar(2);
 
-    // ---- Tab bar: show only when FTDC data is loaded (per D-06) ----
-    bool show_tab_bar = (ftdc_view_.load_state() != FtdcLoadState::Idle);
+    // ---- Active session's views (scoped by session index for unique IDs) ----
+    Session& s = active_session();
+
+    // ---- Inner tab bar: show only when FTDC data is loaded (per D-06) ----
+    bool show_tab_bar = (s.ftdc_view.load_state() != FtdcLoadState::Idle);
 
     if (show_tab_bar) {
         if (ImGui::BeginTabBar("##main_tabs", ImGuiTabBarFlags_None)) {
-            ImGuiTabItemFlags logs_flags = (active_tab_ == 0 && force_tab_switch_)
+            ImGuiTabItemFlags logs_flags = (s.active_tab == 0 && s.force_tab_switch)
                 ? ImGuiTabItemFlags_SetSelected : 0;
-            ImGuiTabItemFlags ftdc_flags = (active_tab_ == 1 && force_tab_switch_)
+            ImGuiTabItemFlags ftdc_flags = (s.active_tab == 1 && s.force_tab_switch)
                 ? ImGuiTabItemFlags_SetSelected : 0;
-            if (force_tab_switch_) force_tab_switch_ = false;
+            if (s.force_tab_switch) s.force_tab_switch = false;
 
             if (ImGui::BeginTabItem("Logs", nullptr, logs_flags)) {
-                active_tab_ = 0;
+                s.active_tab = 0;
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("FTDC", nullptr, ftdc_flags)) {
-                active_tab_ = 1;
+                s.active_tab = 1;
                 ImGui::EndTabItem();
             }
             ImGui::EndTabBar();
@@ -758,15 +832,15 @@ void App::render_dockspace() {
     ImVec2 avail = ImGui::GetContentRegionAvail();
     float h = avail.y;
 
-    if (!show_tab_bar || active_tab_ == 0) {
+    if (!show_tab_bar || s.active_tab == 0) {
         // ---- Logs tab: existing three-column layout ----
         float vsplitter_w = 6.0f; // vertical (left-column-width) splitter
 
         // ---- Left column — single unified scrollable filter panel ----
-        bool has_data = cluster_ && cluster_->state() == LoadState::Ready;
+        bool has_data = s.cluster && s.cluster->state() == LoadState::Ready;
         ImGui::BeginChild("##left_col", ImVec2(left_w_, h), true);
         if (has_data)
-            breakdown_view_.render();
+            s.breakdown_view.render();
         else
             ImGui::TextDisabled("Drop MongoDB log files here to begin.");
         ImGui::EndChild();
@@ -796,7 +870,7 @@ void App::render_dockspace() {
         center_w_actual = std::max(center_w_actual, 120.0f);
 
         ImGui::BeginChild("##logview", ImVec2(center_w_actual, h), true);
-        log_view_.render_inner();
+        s.log_view.render_inner();
         ImGui::EndChild();
 
         ImGui::SameLine(0, 0);
@@ -826,25 +900,28 @@ void App::render_dockspace() {
 
         // Right: detail view (resizable)
         ImGui::BeginChild("##detail", ImVec2(right_w_, h), true);
-        detail_view_.render_inner();
+        s.detail_view.render_inner();
         ImGui::EndChild();
     }
 
-    if (show_tab_bar && active_tab_ == 1) {
+    if (show_tab_bar && s.active_tab == 1) {
         // ---- FTDC tab: two-column layout ----
-        ftdc_view_.render(h);
+        s.ftdc_view.render(h);
     }
 
     ImGui::End();
 }
 
 // ------------------------------------------------------------
-//  render_loading_popup
+//  render_loading_popup — checks ALL sessions (D-50)
 // ------------------------------------------------------------
 void App::render_loading_popup() {
-    // ---- Log cluster loading popup ----
-    if (cluster_ && cluster_->state() == LoadState::Loading) {
-        float progress = cluster_->progress();
+    Session& active = active_session();
+
+    // ---- Log cluster loading popup (active session only — only one
+    //      centered popup at a time makes sense) ----
+    if (active.cluster && active.cluster->state() == LoadState::Loading) {
+        float progress = active.cluster->progress();
 
         // Centre a fixed-size popup on screen
         ImGuiIO& io   = ImGui::GetIO();
@@ -884,8 +961,6 @@ void App::render_loading_popup() {
         ImGui::PopStyleColor(2);
 
         // Draw the percentage text centred over the bar, split at the fill boundary.
-        // Characters whose centres lie left of the fill edge get black text (yellow bg),
-        // characters to the right get white text (dark bg).
         char pct[16];
         std::snprintf(pct, sizeof(pct), "%.0f%%", progress * 100.0f);
 
@@ -919,106 +994,114 @@ void App::render_loading_popup() {
         ImGui::End();
     }
 
-    // ---- FTDC loading popup (independent of cluster state) ----
-    ftdc_view_.render_loading_popup();
+    // ---- FTDC loading popups for ALL sessions (D-50) ----
+    for (int i = 0; i < static_cast<int>(sessions_.size()); ++i) {
+        ImGui::PushID(i);
+        sessions_[i]->ftdc_view.render_loading_popup();
+        ImGui::PopID();
+    }
 }
 
 // ------------------------------------------------------------
 //  render_frame
 // ------------------------------------------------------------
 void App::render_frame() {
-    // If a load just finished → update UI views.
-    // last_cluster_state_ is a member so start_load() can reset it to Idle,
-    // ensuring the Ready transition always fires exactly once per load.
-    if (cluster_) {
-        LoadState cur = cluster_->state();
-        if (cur != last_cluster_state_ && cur == LoadState::Ready) {
-            auto now = std::chrono::steady_clock::now();
-            load_duration_s_ = std::chrono::duration<double>(
-                now - load_start_).count();
+    // Poll ALL sessions for load completion (D-49: inactive sessions
+    // still detect transitions)
+    for (auto& sp : sessions_) {
+        Session& s = *sp;
+        if (s.cluster) {
+            LoadState cur = s.cluster->state();
+            if (cur != s.last_cluster_state && cur == LoadState::Ready) {
+                auto now = std::chrono::steady_clock::now();
+                s.load_duration_s = std::chrono::duration<double>(
+                    now - s.load_start).count();
 
-            const auto& nodes = cluster_->nodes();
-            log_view_.set_entries(&cluster_->entries(),
-                                   &cluster_->strings(), &nodes);
-            breakdown_view_.set_analysis(&cluster_->analysis(),
-                                           &cluster_->strings());
-            breakdown_view_.set_nodes(&cluster_->nodes());
+                const auto& nodes = s.cluster->nodes();
+                s.log_view.set_entries(&s.cluster->entries(),
+                                       &s.cluster->strings(), &nodes);
+                s.breakdown_view.set_analysis(&s.cluster->analysis(),
+                                               &s.cluster->strings());
+                s.breakdown_view.set_nodes(&s.cluster->nodes());
 
-            // Wire LLM tools to the new cluster data
-            llm_client_.tools().set_cluster(cluster_.get());
-            // Clear conversation — old data context is stale
-            llm_client_.clear();
+                // Wire LLM tools to the new cluster data
+                s.llm_client.tools().set_cluster(s.cluster.get());
+                // Clear conversation — old data context is stale
+                s.llm_client.clear();
 
-            // Build flat pointer list for FTDC annotation markers
-            log_entry_ptrs_.clear();
-            const auto& entries = cluster_->entries();
-            log_entry_ptrs_.reserve(entries.size());
-            for (size_t i = 0; i < entries.size(); ++i)
-                log_entry_ptrs_.push_back(&entries[i]);
-            ftdc_view_.set_log_data(&log_entry_ptrs_, &cluster_->strings());
+                // Build flat pointer list for FTDC annotation markers
+                s.log_entry_ptrs.clear();
+                const auto& entries = s.cluster->entries();
+                s.log_entry_ptrs.reserve(entries.size());
+                for (size_t i = 0; i < entries.size(); ++i)
+                    s.log_entry_ptrs.push_back(&entries[i]);
+                s.ftdc_view.set_log_data(&s.log_entry_ptrs, &s.cluster->strings());
+            }
+            s.last_cluster_state = cur;
         }
-        last_cluster_state_ = cur;
+        // Poll FTDC for all sessions (D-49)
+        s.ftdc_view.poll_state();
     }
-
-    // Poll FTDC load state every frame (catch Loading→Ready even when tab not active)
-    ftdc_view_.poll_state();
 
     render_menu_bar();
 
-    // Sample mode popup — centered, dismissable, shown once per load
-    if (sample_mode_ && !sample_notice_dismissed_
-        && cluster_ && cluster_->state() == LoadState::Ready)
+    // Sample mode popup — active session only (centered, dismissable, shown once per load)
     {
-        ImGui::OpenPopup("##sample_notice");
-    }
-
-    if (ImGui::BeginPopupModal("##sample_notice", nullptr,
-                                ImGuiWindowFlags_NoTitleBar |
-                                ImGuiWindowFlags_NoResize   |
-                                ImGuiWindowFlags_AlwaysAutoResize))
-    {
-        ImGuiIO& io = ImGui::GetIO();
-        ImGui::SetNextWindowPos(
-            ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f),
-            ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-
-        // Amber warning header
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.80f, 0.15f, 1.0f));
-        ImGui::Text("File too large for full load");
-        ImGui::PopStyleColor();
-
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        ImGui::TextWrapped(
-            "This file (%.1f GB) exceeds the available memory budget.\n\n"
-            "Only %.0f%% of log entries have been loaded (every ~%d-th line).\n\n"
-            "Breakdown counts and analysis are approximate.\n\n"
-            "To load more entries, increase the memory limit in\n"
-            "Edit > Preferences > Memory.",
-            static_cast<double>(total_file_bytes_) / (1024.0 * 1024.0 * 1024.0),
-            cluster_->sample_ratio() * 100.0f,
-            std::max(1, static_cast<int>(1.0f / cluster_->sample_ratio() + 0.5f)));
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        float btn_w = 120.0f;
-        ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - btn_w) * 0.5f
-                             + ImGui::GetCursorPosX());
-        if (ImGui::Button("OK", ImVec2(btn_w, 0))) {
-            sample_notice_dismissed_ = true;
-            ImGui::CloseCurrentPopup();
+        Session& s = active_session();
+        if (s.sample_mode && !s.sample_notice_dismissed
+            && s.cluster && s.cluster->state() == LoadState::Ready)
+        {
+            ImGui::OpenPopup("##sample_notice");
         }
 
-        ImGui::EndPopup();
+        if (ImGui::BeginPopupModal("##sample_notice", nullptr,
+                                    ImGuiWindowFlags_NoTitleBar |
+                                    ImGuiWindowFlags_NoResize   |
+                                    ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            ImGuiIO& io = ImGui::GetIO();
+            ImGui::SetNextWindowPos(
+                ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f),
+                ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+
+            // Amber warning header
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.80f, 0.15f, 1.0f));
+            ImGui::Text("File too large for full load");
+            ImGui::PopStyleColor();
+
+            ImGui::Separator();
+            ImGui::Spacing();
+
+            ImGui::TextWrapped(
+                "This file (%.1f GB) exceeds the available memory budget.\n\n"
+                "Only %.0f%% of log entries have been loaded (every ~%d-th line).\n\n"
+                "Breakdown counts and analysis are approximate.\n\n"
+                "To load more entries, increase the memory limit in\n"
+                "Edit > Preferences > Memory.",
+                static_cast<double>(s.total_file_bytes) / (1024.0 * 1024.0 * 1024.0),
+                s.cluster->sample_ratio() * 100.0f,
+                std::max(1, static_cast<int>(1.0f / s.cluster->sample_ratio() + 0.5f)));
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+
+            float btn_w = 120.0f;
+            ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - btn_w) * 0.5f
+                                 + ImGui::GetCursorPosX());
+            if (ImGui::Button("OK", ImVec2(btn_w, 0))) {
+                s.sample_notice_dismissed = true;
+                ImGui::CloseCurrentPopup();
+            }
+
+            ImGui::EndPopup();
+        }
     }
 
     render_dockspace();
     render_loading_popup();
     prefs_view_.render();
-    chat_view_.render();
+    active_session().chat_view.render();
 }
 
 // ------------------------------------------------------------
@@ -1047,11 +1130,11 @@ int App::run() {
                     if ((event.key.keysym.mod & KMOD_CTRL) &&
                         event.key.keysym.sym == SDLK_a &&
                         !ImGui::GetIO().WantTextInput)
-                        chat_view_.toggle();
+                        active_session().chat_view.toggle();
                     // Escape: close AI assistant chat
                     if (event.key.keysym.sym == SDLK_ESCAPE &&
-                        chat_view_.is_open())
-                        chat_view_.close();
+                        active_session().chat_view.is_open())
+                        active_session().chat_view.close();
                     break;
 
                 case SDL_DROPFILE: {
@@ -1126,6 +1209,6 @@ int App::run() {
 #endif
     }
 
-    if (load_thread_.joinable()) load_thread_.join();
+    // Session destructors handle thread joining via sessions_.clear() in ~App
     return 0;
 }
