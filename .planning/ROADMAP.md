@@ -76,46 +76,34 @@ Plans:
 Plans:
 - [ ] TBD
 
-## Backlog
+### Phase 6: Empty State Welcome Screen
 
-### Phase 999.4: Multi-Select File Picker with Deselect Tags (BACKLOG)
+**Goal:** When no files are loaded, display a welcoming blank screen with clear instructions on how to interact with the app. The welcome screen should explain that users can drag in MongoDB log files and/or FTDC diagnostic.data directories for viewing, and provide visual cues (drop zone, icons, or example commands). Disappears automatically when files are loaded.
+
+**Depends on:** None (standalone)
+
+Plans:
+- [ ] TBD
+
+### Phase 7: Multi-Select File Picker with Deselect Tags
 
 **Goal:** Add a multi-select file picker that lets users pick multiple files across different directories using a native or custom file dialog. Selected files appear as tag/chip boxes on screen, each with a small "x" button to deselect. This replaces the current drag-and-drop-only model with an explicit file picker alternative that gives users fine-grained control over which files to load.
 
-**Key Ideas:**
-- File picker button (or menu item) that opens a multi-select file dialog
-- Support picking files across different directories (log files + FTDC directories)
-- Selected files shown as tag/chip boxes (pill-shaped with filename + "x" close button)
-- Clicking "x" on a tag deselects that file (removes it from the pending load list)
-- Tags could appear in a horizontal flow area at the top of the window or in a sidebar
-- "Load" button to confirm and start loading all selected files
-- Consider: integrate with the multi-session tabs (999.2) — each selection set creates a session
-- Consider: remember recent file paths for quick re-selection
-
-**Requirements:** TBD
-**Plans:** 0 plans
+**Depends on:** Phase 6 (welcome screen provides the "Open File" button entry point)
 
 Plans:
-- [ ] TBD (promote with /gsd-review-backlog when ready)
+- [ ] TBD
 
-### Phase 999.5: Empty State Welcome Screen (BACKLOG)
+### Phase 8: Refine FTDC Metrics Graphs and Display
 
-**Goal:** When no files are loaded, display a welcoming blank screen with clear instructions on how to interact with the app. Currently the app opens to an empty view with no guidance. The welcome screen should explain that users can drag in MongoDB log files and/or FTDC diagnostic.data directories for viewing, and provide visual cues (drop zone, icons, or example commands).
+**Goal:** Polish and refine how FTDC metric charts are rendered and how metric data is presented to the user. Ongoing display quality improvements — chart aesthetics, computed/derived metrics, tooltip improvements, stats row layout, threshold band refinement, and visual consistency.
 
-**Key Ideas:**
-- Centered welcome message with app name/logo
-- Clear instructions: "Drag log files (.log) or FTDC directories (diagnostic.data) here to get started"
-- Visual drop zone indicator (dashed border or large icon)
-- Possibly list supported file types with icons
-- "Open File" button linking to the file picker (ties into 999.4)
-- Show recent files for quick re-open (if prefs support it)
-- Disappears automatically when files are loaded
-
-**Requirements:** TBD
-**Plans:** 0 plans
+**Depends on:** Phase 4
 
 Plans:
-- [ ] TBD (promote with /gsd-review-backlog when ready)
+- [ ] TBD
+
+## Backlog
 
 ### Phase 999.6: Dynamic Token Sizing for LLM Requests (BACKLOG)
 
@@ -135,28 +123,7 @@ Plans:
 Plans:
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
-### Phase 999.7: Refine FTDC Metrics Graphs and Display (BACKLOG)
-
-**Goal:** Polish and refine how FTDC metric charts are rendered and how metric data is presented to the user. This is a catch-all for ongoing display quality improvements beyond the initial Phase 3b UX overhaul — further iteration on chart aesthetics, data presentation clarity, and visual consistency.
-
-**Key Ideas:**
-- Improve chart line styling (colors, thickness, anti-aliasing)
-- Better visual differentiation between metrics in the same dashboard group
-- Improve stats row formatting and layout (min/avg/max/p99)
-- Consider sparkline previews in dashboard cards
-- Refine threshold band visual treatment (opacity, color, label)
-- Improve crosshair tooltip layout and information density
-- Consider computed/derived metrics (e.g., cache fill %, eviction failure rate) as first-class chart types
-- Review and improve Y-axis auto-scaling edge cases
-- Chart animation/transition when switching dashboards
-
-**Requirements:** TBD
-**Plans:** 0 plans
-
-Plans:
-- [ ] TBD (promote with /gsd-review-backlog when ready)
-
 ---
 
 *Roadmap created: 2026-04-12*
-*Updated: 2026-04-12 — Removed Phase 5 (compressed overview — already implemented as always-visible minimap), renumbered Phase 6→5*
+*Updated: 2026-04-12 — Promoted 999.5→Phase 6, 999.4→Phase 7, 999.7→Phase 8. Kept 999.6 in backlog.*
