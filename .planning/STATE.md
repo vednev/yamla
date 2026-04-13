@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-04-13T03:41:39.189Z"
+last_updated: "2026-04-13T19:31:02Z"
 last_activity: 2026-04-13
 progress:
   total_phases: 10
   completed_phases: 3
-  total_plans: 14
-  completed_plans: 10
-  percent: 71
+  total_plans: 15
+  completed_plans: 11
+  percent: 73
 ---
 
 # Project State
@@ -28,8 +28,7 @@ progress:
 
 ## Current Phase
 
-Phase 4: FTDC Chart Layout Modes — Complete (code reviewed + fixes applied).
-Next: Phase 5 (Multi-Session Tabs) — not yet started.
+Phase 6: Empty State Welcome Screen — Plan 01 complete (2/2 tasks, 182 tests, 116,282 assertions).
 
 ## Decisions
 
@@ -45,6 +44,7 @@ Next: Phase 5 (Multi-Session Tabs) — not yet started.
 - [Phase 04-01]: List/Grid toggle toolbar + 2/3/4 column layout in ChartPanelView, chart_layout_columns pref field
 - [Phase 05-multi-session-tabs]: D-37/38: Extract ~20 session-specific members into Session struct; App holds vector<unique_ptr<Session>> and active_session_idx_
 - [Phase 05]: D-44: Smart drop routing with 4 rules — empty→fill, FTDC merge, logs→new tab, implicit fill
+- [Phase 06-01]: D-54/55: Welcome screen replaces 3-column layout for empty sessions; D-58/59/60: recent_files in prefs with dedup, LIFO, max 10
 
 ## Pending
 
@@ -52,4 +52,4 @@ None.
 
 ---
 
-*State updated: 2026-04-13 (04-01 complete)*
+*State updated: 2026-04-13 (06-01 complete)*
