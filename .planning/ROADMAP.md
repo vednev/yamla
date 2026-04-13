@@ -169,7 +169,28 @@ Plans:
 Plans:
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
+### Phase 999.7: Refine FTDC Metrics Graphs and Display (BACKLOG)
+
+**Goal:** Polish and refine how FTDC metric charts are rendered and how metric data is presented to the user. This is a catch-all for ongoing display quality improvements beyond the initial Phase 3b UX overhaul — further iteration on chart aesthetics, data presentation clarity, and visual consistency.
+
+**Key Ideas:**
+- Improve chart line styling (colors, thickness, anti-aliasing)
+- Better visual differentiation between metrics in the same dashboard group
+- Improve stats row formatting and layout (min/avg/max/p99)
+- Consider sparkline previews in dashboard cards
+- Refine threshold band visual treatment (opacity, color, label)
+- Improve crosshair tooltip layout and information density
+- Consider computed/derived metrics (e.g., cache fill %, eviction failure rate) as first-class chart types
+- Review and improve Y-axis auto-scaling edge cases
+- Chart animation/transition when switching dashboards
+
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
 ---
 
 *Roadmap created: 2026-04-12*
-*Updated: 2026-04-12 — Added backlog item 999.6 (dynamic token sizing)*
+*Updated: 2026-04-12 — Added backlog item 999.7 (FTDC metrics display refinement)*
