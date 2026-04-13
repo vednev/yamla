@@ -84,6 +84,11 @@ public:
     // Callback: user clicked on a time point; filter_->time_window_active updated
     void set_on_time_click(TimeClickCb cb) { on_time_click_ = std::move(cb); }
 
+    // Set column layout mode from Prefs::chart_layout_columns.
+    // Caller (FtdcView) should call this with Prefs::chart_layout_columns.
+    // The layout_columns_ default of 0 triggers auto-detect (D-33).
+    void set_layout_columns(int cols) { layout_columns_ = cols; }
+
     // Render inside an existing child window (no Begin/End).
     void render_inner();
 
@@ -140,6 +145,8 @@ private:
     bool   drag_committed_ = false;  // set true on release inside a plot
     double drag_end_x_     = 0.0;   // plot-space X where drag ended
     float  drag_end_px_x_  = 0.0f;  // screen-space pixel X where drag ended
+
+    int layout_columns_ = 0;  // 0=auto, 1=list, 2/3/4=grid columns
 
     static constexpr float CHART_HEIGHT   = 140.0f;
     static constexpr float MINIMAP_HEIGHT = 40.0f;

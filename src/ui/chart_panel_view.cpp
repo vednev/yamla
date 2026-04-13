@@ -764,6 +764,61 @@ void ChartPanelView::render_inner() {
         ImGui::Spacing();
     }
 
+    // ---- Layout mode toolbar (per D-25, D-26) ----
+    // Resolve effective column count (per D-33: auto-detect from width)
+    int effective_cols = layout_columns_;
+    if (effective_cols == 0) {
+        effective_cols = (avail_w > 1600.0f) ? 2 : 1;
+    }
+    // Fallback for very narrow windows: force list if columns < 100px each
+    if (effective_cols >= 2) {
+        float min_col_w = (avail_w - (effective_cols - 1) * 8.0f) / effective_cols;
+        if (min_col_w < 100.0f) effective_cols = 1;
+    }
+
+    {
+        bool is_grid = (effective_cols >= 2);
+
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 3.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(2, 0));
+
+        // List button — highlighted when active
+        if (!is_grid) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.25f, 0.35f, 1.0f));
+        if (ImGui::SmallButton("List")) {
+            layout_columns_ = 1;
+            effective_cols = 1;
+        }
+        if (!is_grid) ImGui::PopStyleColor();
+
+        ImGui::SameLine();
+
+        // Grid button — highlighted when active
+        if (is_grid) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.25f, 0.35f, 1.0f));
+        if (ImGui::SmallButton("Grid")) {
+            layout_columns_ = (layout_columns_ >= 2) ? layout_columns_ : 2;
+            effective_cols = (layout_columns_ >= 2) ? layout_columns_ : 2;
+        }
+        if (is_grid) ImGui::PopStyleColor();
+
+        // Column count selector — only visible in grid mode (per D-26)
+        is_grid = (effective_cols >= 2);
+        if (is_grid) {
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(50.0f);
+            const char* col_labels[] = { "2", "3", "4" };
+            int col_idx = effective_cols - 2;  // 0=2cols, 1=3cols, 2=4cols
+            if (col_idx < 0) col_idx = 0;
+            if (col_idx > 2) col_idx = 2;
+            if (ImGui::Combo("##col_count", &col_idx, col_labels, 3)) {
+                layout_columns_ = col_idx + 2;
+                effective_cols = layout_columns_;
+            }
+        }
+
+        ImGui::PopStyleVar(2);
+    }
+    ImGui::Spacing();
+
     // ---- Grouped chart rendering ----
     bool any_plot_hovered = false;
 
@@ -799,7 +854,13 @@ void ChartPanelView::render_inner() {
             ImGui::PopStyleColor(3);
 
             if (header_open) {
-                // Render each chart in this group
+                // Column width per D-28
+                float spacing = 8.0f;
+                float chart_width = (effective_cols >= 2)
+                    ? (avail_w - (effective_cols - 1) * spacing) / effective_cols
+                    : avail_w - spacing;
+
+                int col_idx = 0;
                 for (const auto& path : group_paths) {
                     const MetricSeries* ms = store_->get(path);
                     if (!ms || ms->empty()) continue;
@@ -811,8 +872,16 @@ void ChartPanelView::render_inner() {
                         cit = chart_states_.emplace(path, cs).first;
                     }
 
-                    render_chart(*ms, cit->second, avail_w - 8.0f, CHART_HEIGHT);
+                    // In grid mode, place charts side-by-side using SameLine
+                    if (effective_cols >= 2 && col_idx > 0 && col_idx < effective_cols) {
+                        ImGui::SameLine(0, spacing);
+                    }
+
+                    render_chart(*ms, cit->second, chart_width, CHART_HEIGHT);
                     if (!std::isnan(crosshair_x_)) any_plot_hovered = true;
+
+                    col_idx++;
+                    if (col_idx >= effective_cols) col_idx = 0;
                 }
             }
 
@@ -846,6 +915,12 @@ void ChartPanelView::render_inner() {
             ImGui::PopStyleColor(3);
 
             if (header_open) {
+                float spacing = 8.0f;
+                float chart_width = (effective_cols >= 2)
+                    ? (avail_w - (effective_cols - 1) * spacing) / effective_cols
+                    : avail_w - spacing;
+
+                int col_idx = 0;
                 for (const auto& path : *custom_metrics_) {
                     const MetricSeries* ms = store_->get(path);
                     if (!ms || ms->empty()) continue;
@@ -857,8 +932,15 @@ void ChartPanelView::render_inner() {
                         cit = chart_states_.emplace(path, cs).first;
                     }
 
-                    render_chart(*ms, cit->second, avail_w - 8.0f, CHART_HEIGHT);
+                    if (effective_cols >= 2 && col_idx > 0 && col_idx < effective_cols) {
+                        ImGui::SameLine(0, spacing);
+                    }
+
+                    render_chart(*ms, cit->second, chart_width, CHART_HEIGHT);
                     if (!std::isnan(crosshair_x_)) any_plot_hovered = true;
+
+                    col_idx++;
+                    if (col_idx >= effective_cols) col_idx = 0;
                 }
             }
 
@@ -870,6 +952,12 @@ void ChartPanelView::render_inner() {
     // Fallback: if no groups are set, render flat (backward compat)
     if ((!dashboard_groups_ || dashboard_groups_->empty()) &&
         (!custom_metrics_ || custom_metrics_->empty())) {
+        float spacing = 8.0f;
+        float chart_width = (effective_cols >= 2)
+            ? (avail_w - (effective_cols - 1) * spacing) / effective_cols
+            : avail_w - spacing;
+
+        int col_idx = 0;
         for (const auto& path : *selected_) {
             const MetricSeries* ms = store_->get(path);
             if (!ms || ms->empty()) continue;
@@ -881,8 +969,15 @@ void ChartPanelView::render_inner() {
                 it = chart_states_.emplace(path, cs).first;
             }
 
-            render_chart(*ms, it->second, avail_w - 8.0f, CHART_HEIGHT);
+            if (effective_cols >= 2 && col_idx > 0 && col_idx < effective_cols) {
+                ImGui::SameLine(0, spacing);
+            }
+
+            render_chart(*ms, it->second, chart_width, CHART_HEIGHT);
             if (!std::isnan(crosshair_x_)) any_plot_hovered = true;
+
+            col_idx++;
+            if (col_idx >= effective_cols) col_idx = 0;
         }
     }
 
