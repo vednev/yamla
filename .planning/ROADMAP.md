@@ -43,22 +43,39 @@ Plans:
 - [x] 03-03-PLAN.md — App integration: tab bar, drop detection, cross-view linking
 - [x] 03-04-PLAN.md — Build system (zlib), CI update, full build + test verification
 
-### Phase 3b: FTDC View UX Overhaul
+### Phase 3b: FTDC View UX Overhaul — COMPLETE
 
-**Goal:** Redesign the FTDC view UX: dashboard-first navigation with 12-15 curated category cards (toggle on/off), anomaly status badges, collapsible chart groups in the right panel, and a search overlay replacing the verbose raw metric tree. Based on `knowledge/ftdc_knowledge.md` domain expertise and external tool research.
+**Goal:** Redesign the FTDC view UX: dashboard-first navigation with 15 curated category cards (toggle on/off), anomaly status badges, collapsible chart groups in the right panel, and a search overlay replacing the verbose raw metric tree. Based on `knowledge/ftdc_knowledge.md` domain expertise and external tool research.
 
 **Context:** `.planning/phases/03-ftdc-support/03b-CONTEXT.md`
 
-**Requirements:** [D-12, D-13, D-14, D-15, D-16, D-17, D-18, D-19, D-20, D-21, D-22, D-23, D-24]
-
-**Plans:** 3 plans
+**Result:** 15 dashboard categories, 134 metric definitions, 8 new anomaly thresholds, dashboard-first navigation with toggle cards, anomaly badges, search overlay, collapsible chart groups. 178 tests still passing.
 
 Plans:
-- [x] 03-05-PLAN.md — Expand metric_defs.hpp: 15 dashboards, ~50 new metrics, 8 new thresholds, disk I/O pattern helper
+- [x] 03-05-PLAN.md — Expand metric_defs.hpp: 15 dashboards, 66 new metrics, 8 new thresholds, disk I/O pattern helper
 - [x] 03-06-PLAN.md — Rewrite MetricTreeView: dashboard cards, anomaly badges, search overlay
 - [x] 03-07-PLAN.md — ChartPanelView category grouping + FtdcView wiring + full test verification
+
+## Backlog
+
+### Phase 999.1: Compressed FTDC Overview Graph with Timeline Navigation (BACKLOG)
+
+**Goal:** Compress all FTDC data into a single overview graph that is always visible at the top of the FTDC view. Add regular timeline interval markers to this graph so the user can quickly click/drag to zoom all charts to a specific timeframe. The current minimap only appears when zoomed in and only shows one metric — this replaces it with a permanent, multi-metric summary view with interactive time navigation.
+
+**Key Ideas:**
+- Always-visible hint/overview map at the top (not just when zoomed)
+- Compressed single view showing aggregate activity across all loaded metrics
+- Regular time interval labels in the overview for orientation
+- Click/drag on the overview to set the zoom window for all charts below
+- Consider showing anomaly regions (red bands) in the overview where thresholds are exceeded
+
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd-review-backlog when ready)
 
 ---
 
 *Roadmap created: 2026-04-12*
-*Updated: 2026-04-12 — Phase 3b planned (3 plans in 2 waves)*
+*Updated: 2026-04-12 — Added backlog item 999.1 (compressed FTDC overview)*
