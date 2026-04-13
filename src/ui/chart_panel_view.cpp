@@ -283,8 +283,10 @@ void ChartPanelView::render_minimap(float width, float height) {
             ImPlotAxisFlags_AutoFit);
         ImPlot::SetupAxisLimits(ImAxis_X1, x_min_, x_max_, ImGuiCond_Always);
 
-        // Draw thin lines for all selected metrics
+        // Draw thin lines for all selected metrics.
+        // Reuse a single pair of vectors to avoid per-metric allocations.
         if (selected_) {
+            std::vector<double> xs, ys;
             for (const auto& path : *selected_) {
                 const MetricSeries* s = store_->get(path);
                 if (!s || s->empty()) continue;
@@ -294,7 +296,7 @@ void ChartPanelView::render_minimap(float width, float height) {
                 size_t n = std::min(s->timestamps_ms.size(), values.size());
                 if (n == 0) continue;
 
-                std::vector<double> xs(n), ys(n);
+                xs.resize(n); ys.resize(n);
                 for (size_t i = 0; i < n; ++i) {
                     xs[i] = ms_to_plot(s->timestamps_ms[i]);
                     ys[i] = values[i];
@@ -809,6 +811,15 @@ void ChartPanelView::render_inner() {
         }
         if (is_grid) ImGui::PopStyleColor();
 
+        // Auto button — returns to auto-detect mode (per WR-02)
+        if (layout_columns_ != 0) {
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Auto")) {
+                layout_columns_ = 0;
+                effective_cols = (avail_w > 1600.0f) ? 2 : 1;
+            }
+        }
+
         // Column count selector — only visible in grid mode (per D-26)
         is_grid = (effective_cols >= 2);
         if (is_grid) {
@@ -874,10 +885,12 @@ void ChartPanelView::render_inner() {
                 // BeginPlot/EndPlot internally advances the cursor.
                 bool use_table = (effective_cols >= 2);
                 if (use_table) {
-                    ImGui::BeginTable("##chart_grid", effective_cols,
+                    use_table = ImGui::BeginTable("##chart_grid", effective_cols,
                         ImGuiTableFlags_NoBordersInBody | ImGuiTableFlags_SizingFixedFit);
-                    for (int c = 0; c < effective_cols; ++c) {
-                        ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, chart_width);
+                    if (use_table) {
+                        for (int c = 0; c < effective_cols; ++c) {
+                            ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, chart_width);
+                        }
                     }
                 }
 
@@ -947,10 +960,12 @@ void ChartPanelView::render_inner() {
 
                 bool use_table = (effective_cols >= 2);
                 if (use_table) {
-                    ImGui::BeginTable("##custom_chart_grid", effective_cols,
+                    use_table = ImGui::BeginTable("##custom_chart_grid", effective_cols,
                         ImGuiTableFlags_NoBordersInBody | ImGuiTableFlags_SizingFixedFit);
-                    for (int c = 0; c < effective_cols; ++c) {
-                        ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, chart_width);
+                    if (use_table) {
+                        for (int c = 0; c < effective_cols; ++c) {
+                            ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, chart_width);
+                        }
                     }
                 }
 
@@ -998,10 +1013,12 @@ void ChartPanelView::render_inner() {
 
         bool use_table = (effective_cols >= 2);
         if (use_table) {
-            ImGui::BeginTable("##flat_chart_grid", effective_cols,
+            use_table = ImGui::BeginTable("##flat_chart_grid", effective_cols,
                 ImGuiTableFlags_NoBordersInBody | ImGuiTableFlags_SizingFixedFit);
-            for (int c = 0; c < effective_cols; ++c) {
-                ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, chart_width);
+            if (use_table) {
+                for (int c = 0; c < effective_cols; ++c) {
+                    ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, chart_width);
+                }
             }
         }
 

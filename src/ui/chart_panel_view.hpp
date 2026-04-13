@@ -87,7 +87,7 @@ public:
     // Set column layout mode from Prefs::chart_layout_columns.
     // Caller (FtdcView) should call this with Prefs::chart_layout_columns.
     // The layout_columns_ default of 0 triggers auto-detect (D-33).
-    void set_layout_columns(int cols) { layout_columns_ = cols; }
+    void set_layout_columns(int cols) { layout_columns_ = (cols < 0 || cols > 4) ? 0 : cols; }
 
     // Render inside an existing child window (no Begin/End).
     void render_inner();
