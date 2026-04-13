@@ -10,9 +10,10 @@
 #include "../ftdc/metric_defs.hpp"
 
 // ---- Colors ----
-static constexpr ImVec4 COL_CARD_ACTIVE    = ImVec4(0.15f, 0.35f, 0.55f, 1.0f);
-static constexpr ImVec4 COL_CARD_INACTIVE  = ImVec4(0.12f, 0.12f, 0.12f, 1.0f);
-static constexpr ImVec4 COL_CARD_HOVERED   = ImVec4(0.18f, 0.18f, 0.22f, 1.0f);
+static constexpr ImVec4 COL_CARD_ACTIVE         = ImVec4(0.15f, 0.35f, 0.55f, 1.0f);
+static constexpr ImVec4 COL_CARD_ACTIVE_HOVERED = ImVec4(0.12f, 0.28f, 0.45f, 1.0f); // dimmed blue
+static constexpr ImVec4 COL_CARD_INACTIVE       = ImVec4(0.12f, 0.12f, 0.12f, 1.0f);
+static constexpr ImVec4 COL_CARD_INACTIVE_HOVER = ImVec4(0.18f, 0.18f, 0.22f, 1.0f);
 static constexpr ImVec4 COL_BADGE_RED      = ImVec4(1.00f, 0.30f, 0.30f, 1.0f);
 static constexpr ImVec4 COL_BADGE_GREEN    = ImVec4(0.30f, 0.70f, 0.30f, 0.6f);
 static constexpr ImVec4 COL_SEARCH_MATCH   = ImVec4(0.60f, 0.80f, 1.00f, 1.0f);
@@ -180,7 +181,8 @@ void MetricTreeView::render_dashboard_cards() {
         // Card styling: active=blue bg, inactive=dark bg
         ImGui::PushStyleColor(ImGuiCol_Button,
             active ? COL_CARD_ACTIVE : COL_CARD_INACTIVE);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, COL_CARD_HOVERED);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+            active ? COL_CARD_ACTIVE_HOVERED : COL_CARD_INACTIVE_HOVER);
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, COL_CARD_ACTIVE);
         ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 4.0f);
         ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, active ? 1.5f : 0.5f);
