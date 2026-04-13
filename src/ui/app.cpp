@@ -164,6 +164,12 @@ void App::wire_session(Session& s) {
 
     s.chat_view.set_llm_client(&s.llm_client);
     s.chat_view.set_prefs(&prefs_);
+
+    // D-46: Per-session LLM with isolated conversation
+    s.llm_client.set_prefs(&prefs_);
+    // D-48: knowledge_text_ loaded once by App, shared to each session
+    if (!knowledge_text_.empty())
+        s.llm_client.set_system_prompt(knowledge_text_);
 }
 
 void App::close_session(int idx) {
@@ -577,33 +583,65 @@ static bool is_ftdc_path(const std::string& path) {
 }
 
 // ------------------------------------------------------------
-//  handle_drop — routes to active session
+//  handle_drop — smart routing (D-44)
+//
+//  Rules:
+//    1. Active session empty (no log, no FTDC) → add files to it
+//    2. Dropping FTDC onto session with logs but no FTDC → merge
+//    3. Dropping log files onto session that already has logs → new tab
+//    4. (Implicit) Session has FTDC but no logs → add logs to it
+//  No limit on tab count per D-45.
 // ------------------------------------------------------------
 void App::handle_drop(const std::vector<std::string>& paths) {
     if (paths.empty()) return;
-    Session& s = active_session();
 
-    // Auto-detect FTDC data: route to FTDC view
-    if (is_ftdc_path(paths[0])) {
-        s.ftdc_view.start_load(paths[0]);
-        s.active_tab = 1;
-        s.force_tab_switch = true;
+    Session& s = active_session();
+    bool is_ftdc = is_ftdc_path(paths[0]);
+
+    // D-44 rule 1: If active session has no data (empty), add files to it
+    bool session_empty = (!s.cluster || s.cluster->state() == LoadState::Idle)
+                      && s.ftdc_view.load_state() == FtdcLoadState::Idle;
+    if (session_empty) {
+        if (is_ftdc) {
+            s.ftdc_view.start_load(paths[0]);
+            s.active_tab = 1;
+            s.force_tab_switch = true;
+        } else {
+            start_load(paths);
+        }
         return;
     }
 
-    if (s.load_thread.joinable()) s.load_thread.join();
-
-    // If LLM is currently thinking, wait for it to finish before
-    // mutating cluster data. This prevents data races.
-    if (s.llm_client.is_thinking()) {
-        // Fall through to start_load which creates a new cluster
+    // D-44 rule 2: Dropping FTDC onto a session with logs but no FTDC → merge
+    if (is_ftdc) {
+        bool has_logs = s.cluster && s.cluster->state() == LoadState::Ready;
+        bool has_ftdc = s.ftdc_view.load_state() != FtdcLoadState::Idle;
+        if (has_logs && !has_ftdc) {
+            // Merge FTDC into current session (creates combined log+FTDC session)
+            s.ftdc_view.start_load(paths[0]);
+            s.active_tab = 1;
+            s.force_tab_switch = true;
+            return;
+        }
+        // FTDC onto session that already has FTDC → new tab
+        create_session();
+        active_session().ftdc_view.start_load(paths[0]);
+        active_session().active_tab = 1;
+        active_session().force_tab_switch = true;
+        return;
     }
 
-    if (s.cluster && s.cluster->state() == LoadState::Ready && !s.llm_client.is_thinking()) {
-        append_load(paths);
-    } else {
-        start_load(paths);
+    // D-44 rule 3: Dropping log files onto session that already has logs → new tab
+    bool has_logs = s.cluster && (s.cluster->state() == LoadState::Ready ||
+                                   s.cluster->state() == LoadState::Loading);
+    if (has_logs) {
+        create_session();
+        start_load(paths);  // start_load operates on the newly-active session
+        return;
     }
+
+    // D-44 rule 4 (implicit): Session has FTDC but no logs → add logs to it
+    start_load(paths);
 }
 
 void App::start_load(const std::vector<std::string>& paths) {
