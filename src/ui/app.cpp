@@ -842,83 +842,84 @@ void App::render_dockspace() {
 //  render_loading_popup
 // ------------------------------------------------------------
 void App::render_loading_popup() {
-    if (!cluster_ || cluster_->state() != LoadState::Loading) return;
+    // ---- Log cluster loading popup ----
+    if (cluster_ && cluster_->state() == LoadState::Loading) {
+        float progress = cluster_->progress();
 
-    float progress = cluster_->progress();
+        // Centre a fixed-size popup on screen
+        ImGuiIO& io   = ImGui::GetIO();
+        float pw = 420.0f, ph = 90.0f;
+        ImGui::SetNextWindowPos(
+            ImVec2((io.DisplaySize.x - pw) * 0.5f,
+                   (io.DisplaySize.y - ph) * 0.5f),
+            ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(pw, ph), ImGuiCond_Always);
 
-    // Centre a fixed-size popup on screen
-    ImGuiIO& io   = ImGui::GetIO();
-    float pw = 420.0f, ph = 90.0f;
-    ImGui::SetNextWindowPos(
-        ImVec2((io.DisplaySize.x - pw) * 0.5f,
-               (io.DisplaySize.y - ph) * 0.5f),
-        ImGuiCond_Always);
-    ImGui::SetNextWindowSize(ImVec2(pw, ph), ImGuiCond_Always);
+        ImGuiWindowFlags flags =
+            ImGuiWindowFlags_NoTitleBar    | ImGuiWindowFlags_NoResize    |
+            ImGuiWindowFlags_NoMove        | ImGuiWindowFlags_NoScrollbar |
+            ImGuiWindowFlags_NoSavedSettings;
 
-    ImGuiWindowFlags flags =
-        ImGuiWindowFlags_NoTitleBar    | ImGuiWindowFlags_NoResize    |
-        ImGuiWindowFlags_NoMove        | ImGuiWindowFlags_NoScrollbar |
-        ImGuiWindowFlags_NoSavedSettings;
+        ImGui::Begin("##loading_popup", nullptr, flags);
 
-    ImGui::Begin("##loading_popup", nullptr, flags);
+        // Label
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 8.0f);
+        ImGui::SetCursorPosX((pw - ImGui::CalcTextSize("Loading...").x) * 0.5f);
+        ImGui::TextUnformatted("Loading...");
 
-    // Label
-    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 8.0f);
-    ImGui::SetCursorPosX((pw - ImGui::CalcTextSize("Loading...").x) * 0.5f);
-    ImGui::TextUnformatted("Loading...");
+        ImGui::Spacing();
 
-    ImGui::Spacing();
+        // Yellow progress bar — no overlay text passed to ProgressBar itself;
+        // we draw the percentage manually so we can split colours at the fill edge.
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(1.0f, 0.95f, 0.0f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBg,       ImVec4(0.15f, 0.15f, 0.0f, 1.0f));
 
-    // Yellow progress bar — no overlay text passed to ProgressBar itself;
-    // we draw the percentage manually so we can split colours at the fill edge.
-    ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(1.0f, 0.95f, 0.0f, 1.0f));
-    ImGui::PushStyleColor(ImGuiCol_FrameBg,       ImVec4(0.15f, 0.15f, 0.0f, 1.0f));
+        float bar_x     = 12.0f;
+        float bar_w     = pw - 24.0f;
+        float bar_h     = 22.0f;
+        ImGui::SetCursorPosX(bar_x);
+        ImVec2 bar_tl   = ImGui::GetCursorScreenPos(); // absolute TL of bar
+        ImGui::ProgressBar(progress, ImVec2(bar_w, bar_h), "");
 
-    float bar_x     = 12.0f;
-    float bar_w     = pw - 24.0f;
-    float bar_h     = 22.0f;
-    ImGui::SetCursorPosX(bar_x);
-    ImVec2 bar_tl   = ImGui::GetCursorScreenPos(); // absolute TL of bar
-    ImGui::ProgressBar(progress, ImVec2(bar_w, bar_h), "");
+        ImGui::PopStyleColor(2);
 
-    ImGui::PopStyleColor(2);
+        // Draw the percentage text centred over the bar, split at the fill boundary.
+        // Characters whose centres lie left of the fill edge get black text (yellow bg),
+        // characters to the right get white text (dark bg).
+        char pct[16];
+        std::snprintf(pct, sizeof(pct), "%.0f%%", progress * 100.0f);
 
-    // Draw the percentage text centred over the bar, split at the fill boundary.
-    // Characters whose centres lie left of the fill edge get black text (yellow bg),
-    // characters to the right get white text (dark bg).
-    char pct[16];
-    std::snprintf(pct, sizeof(pct), "%.0f%%", progress * 100.0f);
+        ImDrawList* dl  = ImGui::GetWindowDrawList();
+        ImFont*     fnt = ImGui::GetFont();
+        float       fz  = ImGui::GetFontSize();
 
-    ImDrawList* dl  = ImGui::GetWindowDrawList();
-    ImFont*     fnt = ImGui::GetFont();
-    float       fz  = ImGui::GetFontSize();
+        float text_w    = fnt->CalcTextSizeA(fz, FLT_MAX, 0.0f, pct).x;
+        float text_x    = bar_tl.x + (bar_w - text_w) * 0.5f;
+        float text_y    = bar_tl.y + (bar_h - fz) * 0.5f;
 
-    float text_w    = fnt->CalcTextSizeA(fz, FLT_MAX, 0.0f, pct).x;
-    float text_x    = bar_tl.x + (bar_w - text_w) * 0.5f;
-    float text_y    = bar_tl.y + (bar_h - fz) * 0.5f;
+        // X coordinate where the yellow fill ends
+        float fill_end  = bar_tl.x + bar_w * progress;
 
-    // X coordinate where the yellow fill ends
-    float fill_end  = bar_tl.x + bar_w * progress;
+        // Walk each glyph, decide colour by whether its centre is in the filled region
+        const char* p   = pct;
+        float cx        = text_x;
+        while (*p) {
+            unsigned int cp = (unsigned char)*p;
+            const ImFontGlyph* glyph = fnt->FindGlyph((ImWchar)cp);
+            float adv = glyph ? glyph->AdvanceX * (fz / fnt->FontSize) : fz * 0.5f;
+            float char_centre = cx + adv * 0.5f;
+            ImU32 col = (char_centre <= fill_end)
+                ? IM_COL32(0, 0, 0, 255)      // black over yellow fill
+                : IM_COL32(255, 255, 255, 255); // white over dark bg
+            dl->AddText(fnt, fz, ImVec2(cx, text_y), col, p, p + 1);
+            cx += adv;
+            ++p;
+        }
 
-    // Walk each glyph, decide colour by whether its centre is in the filled region
-    const char* p   = pct;
-    float cx        = text_x;
-    while (*p) {
-        unsigned int cp = (unsigned char)*p;
-        const ImFontGlyph* glyph = fnt->FindGlyph((ImWchar)cp);
-        float adv = glyph ? glyph->AdvanceX * (fz / fnt->FontSize) : fz * 0.5f;
-        float char_centre = cx + adv * 0.5f;
-        ImU32 col = (char_centre <= fill_end)
-            ? IM_COL32(0, 0, 0, 255)      // black over yellow fill
-            : IM_COL32(255, 255, 255, 255); // white over dark bg
-        dl->AddText(fnt, fz, ImVec2(cx, text_y), col, p, p + 1);
-        cx += adv;
-        ++p;
+        ImGui::End();
     }
 
-    ImGui::End();
-
-    // FTDC loading popup (separate from cluster loading popup)
+    // ---- FTDC loading popup (independent of cluster state) ----
     ftdc_view_.render_loading_popup();
 }
 
