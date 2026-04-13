@@ -65,7 +65,7 @@ Plans:
 **Plans:** 1 plan
 
 Plans:
-- [ ] 04-01-PLAN.md — Layout toggle toolbar + column grid rendering + prefs persistence
+- [x] 04-01-PLAN.md — Layout toggle toolbar + column grid rendering + prefs persistence
 
 ### Phase 5: Compressed FTDC Overview Graph with Timeline Navigation
 
