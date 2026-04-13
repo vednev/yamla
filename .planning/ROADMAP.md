@@ -132,7 +132,26 @@ Plans:
 Plans:
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
+### Phase 999.5: Empty State Welcome Screen (BACKLOG)
+
+**Goal:** When no files are loaded, display a welcoming blank screen with clear instructions on how to interact with the app. Currently the app opens to an empty view with no guidance. The welcome screen should explain that users can drag in MongoDB log files and/or FTDC diagnostic.data directories for viewing, and provide visual cues (drop zone, icons, or example commands).
+
+**Key Ideas:**
+- Centered welcome message with app name/logo
+- Clear instructions: "Drag log files (.log) or FTDC directories (diagnostic.data) here to get started"
+- Visual drop zone indicator (dashed border or large icon)
+- Possibly list supported file types with icons
+- "Open File" button linking to the file picker (ties into 999.4)
+- Show recent files for quick re-open (if prefs support it)
+- Disappears automatically when files are loaded
+
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
 ---
 
 *Roadmap created: 2026-04-12*
-*Updated: 2026-04-12 — Added backlog item 999.4 (multi-select file picker)*
+*Updated: 2026-04-12 — Added backlog item 999.5 (empty state welcome screen)*
