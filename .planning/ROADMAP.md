@@ -75,7 +75,25 @@ Plans:
 Plans:
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
+### Phase 999.2: Multi-Session Tabs (BACKLOG)
+
+**Goal:** Add application-level tabs where each tab is an independent session. Each session has its own log viewer and FTDC viewer with independent state (filters, scroll position, dashboard selection). Tab titles show the loaded filenames: `log: mongod.log` / `ftdc: metrics.2025-12-18`. This replaces the current single-session model where loading a new file replaces the previous one.
+
+**Key Ideas:**
+- Each tab is a fully independent session (own LogView, FtdcView, AnalysisResult, FilterState, etc.)
+- Tab title bar shows `log: <filename>` and/or `ftdc: <filename>` based on what's loaded
+- Drag-and-drop a file creates a new tab (or adds to current tab if compatible)
+- Close tab button with unsaved-state warning if needed
+- LLM chat could be per-session or shared across sessions (decision needed)
+- Session state isolation: filters, scroll, zoom, dashboard selection all per-tab
+
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
 ---
 
 *Roadmap created: 2026-04-12*
-*Updated: 2026-04-12 — Added backlog item 999.1 (compressed FTDC overview)*
+*Updated: 2026-04-12 — Added backlog item 999.2 (multi-session tabs)*
