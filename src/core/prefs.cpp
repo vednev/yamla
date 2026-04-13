@@ -88,6 +88,47 @@ Prefs PrefsManager::load() {
     parse_str("\"export_dir\"",   p.export_dir);
     parse_int("\"chart_cols\"",  p.chart_layout_columns);
 
+    // Parse "recent_files":[...] array
+    {
+        const char* pos = std::strstr(buf, "\"recent_files\"");
+        if (pos) {
+            pos = std::strchr(pos, '[');
+            if (pos) {
+                ++pos; // skip '['
+                while (*pos) {
+                    // Skip whitespace and commas
+                    while (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r' || *pos == ',')
+                        ++pos;
+                    if (*pos == ']') break;
+                    if (*pos == '"') {
+                        ++pos; // skip opening quote
+                        std::string val;
+                        while (*pos && *pos != '"') {
+                            if (*pos == '\\' && *(pos+1)) {
+                                ++pos;
+                                switch (*pos) {
+                                    case '"':  val += '"';  break;
+                                    case '\\': val += '\\'; break;
+                                    case 'n':  val += '\n'; break;
+                                    case 'r':  val += '\r'; break;
+                                    case 't':  val += '\t'; break;
+                                    default:   val += *pos; break;
+                                }
+                            } else {
+                                val += *pos;
+                            }
+                            ++pos;
+                        }
+                        if (*pos == '"') ++pos; // skip closing quote
+                        p.recent_files.push_back(std::move(val));
+                    } else {
+                        break; // unexpected character
+                    }
+                }
+            }
+        }
+    }
+
     // Clamp size to valid range
     if (p.font_size < 10) p.font_size = 10;
     if (p.font_size > 20) p.font_size = 20;
@@ -113,16 +154,27 @@ void PrefsManager::save(const Prefs& p) {
 
     FILE* f = std::fopen(path.c_str(), "w");
     if (!f) return;
+
+    // Build recent_files JSON array
+    std::string rf = "[";
+    for (size_t i = 0; i < p.recent_files.size(); ++i) {
+        if (i > 0) rf += ",";
+        rf += "\"" + json_escape(p.recent_files[i]) + "\"";
+    }
+    rf += "]";
+
     std::fprintf(f,
         "{\"font\":\"%s\",\"size\":%d,\"mem_gb\":%d,\"ckbox\":%d,"
         "\"llm_key\":\"%s\",\"llm_endpoint\":\"%s\","
         "\"llm_model\":\"%s\",\"llm_maxtok\":%d,"
-        "\"export_dir\":\"%s\",\"chart_cols\":%d}\n",
+        "\"export_dir\":\"%s\",\"chart_cols\":%d,"
+        "\"recent_files\":%s}\n",
         json_escape(p.font_name).c_str(), p.font_size, p.memory_limit_gb,
         p.prefer_checkboxes ? 1 : 0,
         json_escape(p.llm_api_key).c_str(), json_escape(p.llm_endpoint).c_str(),
         json_escape(p.llm_model).c_str(), p.llm_max_tokens,
-        json_escape(p.export_dir).c_str(), p.chart_layout_columns);
+        json_escape(p.export_dir).c_str(), p.chart_layout_columns,
+        rf.c_str());
     std::fclose(f);
 
 #if !defined(_WIN32)

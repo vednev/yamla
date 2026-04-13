@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 // ------------------------------------------------------------
 //  Prefs — user preferences persisted to disk
@@ -20,6 +21,9 @@ struct Prefs {
 
     // Chart layout: 0=auto-detect, 1=list, 2/3/4=column count
     int         chart_layout_columns = 0;
+
+    // Recent files: full paths, most recent first, max 10 managed by App
+    std::vector<std::string> recent_files;
 };
 
 // ------------------------------------------------------------

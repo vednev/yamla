@@ -183,3 +183,41 @@ TEST_CASE("Prefs: prefer_checkboxes round-trip", "[prefs]") {
     loaded = PrefsManager::load();
     REQUIRE(loaded.prefer_checkboxes == false);
 }
+
+TEST_CASE("Prefs: default recent_files is empty", "[prefs]") {
+    Prefs p;
+    REQUIRE(p.recent_files.empty());
+}
+
+TEST_CASE("Prefs: recent_files round-trip", "[prefs]") {
+    TempHome th;
+    Prefs orig;
+    orig.recent_files = {"/path/to/mongod.log", "/data/diagnostic.data/metrics.2025", "/tmp/test.log"};
+    PrefsManager::save(orig);
+    Prefs loaded = PrefsManager::load();
+    REQUIRE(loaded.recent_files.size() == 3);
+    REQUIRE(loaded.recent_files[0] == "/path/to/mongod.log");
+    REQUIRE(loaded.recent_files[1] == "/data/diagnostic.data/metrics.2025");
+    REQUIRE(loaded.recent_files[2] == "/tmp/test.log");
+}
+
+TEST_CASE("Prefs: recent_files special characters round-trip", "[prefs]") {
+    TempHome th;
+    Prefs orig;
+    orig.recent_files = {"/path/with spaces/file.log", "C:\\Users\\test\\mongod.log", "/path/with\"quotes\"/file.log"};
+    PrefsManager::save(orig);
+    Prefs loaded = PrefsManager::load();
+    REQUIRE(loaded.recent_files.size() == 3);
+    REQUIRE(loaded.recent_files[0] == "/path/with spaces/file.log");
+    REQUIRE(loaded.recent_files[1] == "C:\\Users\\test\\mongod.log");
+    REQUIRE(loaded.recent_files[2] == "/path/with\"quotes\"/file.log");
+}
+
+TEST_CASE("Prefs: empty recent_files round-trip", "[prefs]") {
+    TempHome th;
+    Prefs orig;
+    orig.recent_files = {};
+    PrefsManager::save(orig);
+    Prefs loaded = PrefsManager::load();
+    REQUIRE(loaded.recent_files.empty());
+}
