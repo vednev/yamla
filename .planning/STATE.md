@@ -28,7 +28,8 @@ progress:
 
 ## Current Phase
 
-Phase 4: FTDC Chart Layout Modes — Plan 01 complete (1/1 plans).
+Phase 4: FTDC Chart Layout Modes — Complete (code reviewed + fixes applied).
+Next: Phase 5 (Multi-Session Tabs) — not yet started.
 
 ## Decisions
 

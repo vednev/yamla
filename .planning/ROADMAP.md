@@ -67,20 +67,11 @@ Plans:
 Plans:
 - [x] 04-01-PLAN.md — Layout toggle toolbar + column grid rendering + prefs persistence
 
-### Phase 5: Compressed FTDC Overview Graph with Timeline Navigation
-
-**Goal:** Compress all FTDC data into a single overview graph that is always visible at the top of the FTDC view. Add regular timeline interval markers to this graph so the user can quickly click/drag to zoom all charts to a specific timeframe. The current minimap only appears when zoomed in and only shows one metric — this replaces it with a permanent, multi-metric summary view with interactive time navigation.
-
-**Depends on:** Phase 3b
-
-Plans:
-- [ ] TBD
-
-### Phase 6: Multi-Session Tabs
+### Phase 5: Multi-Session Tabs
 
 **Goal:** Add application-level tabs where each tab is an independent session. Each session has its own log viewer and FTDC viewer with independent state (filters, scroll position, dashboard selection). Tab titles show the loaded filenames: `log: mongod.log` / `ftdc: metrics.2025-12-18`. This replaces the current single-session model where loading a new file replaces the previous one.
 
-**Depends on:** Phase 4, Phase 5
+**Depends on:** Phase 4
 
 Plans:
 - [ ] TBD
@@ -168,4 +159,4 @@ Plans:
 ---
 
 *Roadmap created: 2026-04-12*
-*Updated: 2026-04-12 — Promoted 999.3→Phase 4, 999.1→Phase 5, 999.2→Phase 6*
+*Updated: 2026-04-12 — Removed Phase 5 (compressed overview — already implemented as always-visible minimap), renumbered Phase 6→5*
