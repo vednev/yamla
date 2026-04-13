@@ -25,10 +25,13 @@ progress:
 - [x] Phase 2: SSE Streaming + Chat UI Fix
 - [x] Phase 3: FTDC Support (178 tests, 116,272 assertions — 29 new FTDC tests)
 - [x] Phase 3b: FTDC View UX Overhaul (15 dashboards, 134 metrics, anomaly badges, search overlay, collapsible groups)
+- [x] Phase 4: FTDC Chart Layout Modes (list/grid toggle, 2/3/4 columns, code reviewed)
+- [x] Phase 5: Multi-Session Tabs (Session struct, tab bar, smart drop routing, per-session LLM)
+- [x] Phase 6: Empty State Welcome Screen (welcome screen, recent files, 182 tests)
 
 ## Current Phase
 
-Phase 6: Empty State Welcome Screen — Plan 01 complete (2/2 tasks, 182 tests, 116,282 assertions).
+None — Phases 1-6 complete. Next: Phase 7 (Multi-Select File Picker) or Phase 8 (FTDC Metrics Polish).
 
 ## Decisions
 

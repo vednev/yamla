@@ -56,39 +56,33 @@ Plans:
 - [x] 03-06-PLAN.md — Rewrite MetricTreeView: dashboard cards, anomaly badges, search overlay
 - [x] 03-07-PLAN.md — ChartPanelView category grouping + FtdcView wiring + full test verification
 
-### Phase 4: FTDC Chart Layout Modes — List vs Columns
+### Phase 4: FTDC Chart Layout Modes — COMPLETE
 
-**Goal:** Allow users to switch between list view (current single-column stacked charts) and a multi-column grid view for FTDC metrics. A toggle button switches between list and column mode. In column mode, a dropdown lets the user pick the number of columns (2, 3, 4). Charts resize to fit the selected column count. This enables side-by-side comparison of related metrics and better use of wide screens.
+**Goal:** Allow users to switch between list view (current single-column stacked charts) and a multi-column grid view for FTDC metrics. A toggle button switches between list and column mode. In column mode, a dropdown lets the user pick the number of columns (2, 3, 4). Charts resize to fit the selected column count.
 
-**Depends on:** Phase 3b
-
-**Plans:** 1 plan
+**Result:** List/Grid toggle toolbar, 2/3/4-column grid via ImGui::BeginTable, auto-detect from window width, prefs persistence, code reviewed + 6 findings fixed.
 
 Plans:
 - [x] 04-01-PLAN.md — Layout toggle toolbar + column grid rendering + prefs persistence
 
-### Phase 5: Multi-Session Tabs
+### Phase 5: Multi-Session Tabs — COMPLETE
 
-**Goal:** Add application-level tabs where each tab is an independent session. Each session has its own log viewer and FTDC viewer with independent state (filters, scroll position, dashboard selection). Tab titles show the loaded filenames: `log: mongod.log` / `ftdc: metrics.2025-12-18`. This replaces the current single-session model where loading a new file replaces the previous one.
+**Goal:** Add application-level tabs where each tab is an independent session with its own log viewer, FTDC viewer, and LLM chat. Smart file drop routing, per-session state isolation, combined tab titles.
 
-**Depends on:** Phase 4
-
-**Plans:** 2 plans
+**Result:** Session struct extraction (~20 members), outer tab bar with close confirmation, smart 4-rule drop routing, per-session LLM chat with tool bindings. 182 tests passing.
 
 Plans:
 - [x] 05-01-PLAN.md — Session struct extraction + tab bar UI + session-scoped rendering
 - [x] 05-02-PLAN.md — Smart file drop routing + per-session LLM + build/test verification
 
-### Phase 6: Empty State Welcome Screen
+### Phase 6: Empty State Welcome Screen — COMPLETE
 
-**Goal:** When no files are loaded, display a welcoming blank screen with clear instructions on how to interact with the app. The welcome screen should explain that users can drag in MongoDB log files and/or FTDC diagnostic.data directories for viewing, and provide visual cues (drop zone, icons, or example commands). Disappears automatically when files are loaded.
+**Goal:** Centered welcome screen when no data is loaded, with app name, drag instructions, supported file types, and clickable recent files list persisted in prefs.
 
-**Depends on:** None (standalone)
-
-**Plans:** 1 plan
+**Result:** Full-area welcome screen, recent_files in prefs (max 10, deduped), 4 new tests. 182 tests passing.
 
 Plans:
-- [ ] 06-01-PLAN.md — Welcome screen rendering + recent files tracking + prefs serialization
+- [x] 06-01-PLAN.md — Welcome screen rendering + recent files tracking + prefs serialization
 
 ### Phase 7: Multi-Select File Picker with Deselect Tags
 
@@ -131,4 +125,4 @@ Plans:
 ---
 
 *Roadmap created: 2026-04-12*
-*Updated: 2026-04-12 — Promoted 999.5→Phase 6, 999.4→Phase 7, 999.7→Phase 8. Kept 999.6 in backlog.*
+*Updated: 2026-04-13 — Phases 4, 5, 6 marked complete. 182 tests, 116,282 assertions.*
