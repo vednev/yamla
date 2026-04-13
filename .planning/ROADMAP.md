@@ -93,7 +93,26 @@ Plans:
 Plans:
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
+### Phase 999.3: FTDC Chart Layout Modes — List vs Columns (BACKLOG)
+
+**Goal:** Allow users to switch between list view (current single-column stacked charts) and a multi-column grid view for FTDC metrics. A toggle button switches between list and column mode. In column mode, a dropdown lets the user pick the number of columns (2, 3, 4). Charts resize to fit the selected column count. This enables side-by-side comparison of related metrics and better use of wide screens.
+
+**Key Ideas:**
+- Toggle button (list icon / grid icon) in the chart panel header area
+- List mode: current behavior — full-width charts stacked vertically
+- Column mode: charts arranged in N-column grid (user picks 2, 3, or 4 via dropdown)
+- Charts resize width proportionally; height stays fixed at 140px
+- Column layout respects dashboard group boundaries (each group fills its own rows)
+- Persist layout preference in prefs
+- Consider: drag-and-drop reordering of charts within a group
+
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
 ---
 
 *Roadmap created: 2026-04-12*
-*Updated: 2026-04-12 — Added backlog item 999.2 (multi-session tabs)*
+*Updated: 2026-04-12 — Added backlog item 999.3 (chart layout modes)*
