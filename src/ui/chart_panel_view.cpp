@@ -514,6 +514,7 @@ void ChartPanelView::render_chart(const MetricSeries& series,
         title += "  (" + series.unit + ")";
 
     ImGui::PushID(series.path.c_str());
+    ImGui::BeginGroup(); // Group title+plot+stats so SameLine() treats as one unit
     ImGui::TextUnformatted(title.c_str());
 
     // Compute threshold for this series
@@ -670,6 +671,7 @@ void ChartPanelView::render_chart(const MetricSeries& series,
     int64_t t1 = plot_to_ms(x_view_max_);
     render_stats_row(series, use_rate, t0, t1);
 
+    ImGui::EndGroup(); // End group started before title
     ImGui::PopID();
     ImGui::Spacing();
 }
