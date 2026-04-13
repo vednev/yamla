@@ -85,8 +85,10 @@ Plans:
 
 **Depends on:** None (standalone)
 
+**Plans:** 1 plan
+
 Plans:
-- [ ] TBD
+- [ ] 06-01-PLAN.md — Welcome screen rendering + recent files tracking + prefs serialization
 
 ### Phase 7: Multi-Select File Picker with Deselect Tags
 
