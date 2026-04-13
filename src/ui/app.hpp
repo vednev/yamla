@@ -174,6 +174,10 @@ private:
     // Knowledge text loaded once at startup, passed to each session's LlmClient (D-48)
     std::string knowledge_text_;
 
+    // Close confirmation dialog state (D-42)
+    bool  show_close_confirm_ = false;
+    int   close_confirm_idx_  = -1;
+
     void load_knowledge();          // reads knowledge/*.md into knowledge_text_
     void setup_llm();               // configure client after prefs load
 };

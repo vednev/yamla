@@ -803,7 +803,40 @@ void App::render_dockspace() {
     ImGui::Begin("##host", nullptr, host_flags);
     ImGui::PopStyleVar(2);
 
-    // ---- Active session's views (scoped by session index for unique IDs) ----
+    // ---- Outer session tab bar (D-40) ----
+    if (ImGui::BeginTabBar("##sessions", ImGuiTabBarFlags_AutoSelectNewTabs |
+                                          ImGuiTabBarFlags_FittingPolicyResizeDown)) {
+        for (int i = 0; i < static_cast<int>(sessions_.size()); ++i) {
+            auto& si = *sessions_[i];
+            // Update tab title dynamically (D-41)
+            si.title = compute_tab_title(si);
+            std::string label = si.title + "###session_" + std::to_string(i);
+
+            // D-42: close button via p_open parameter
+            bool tab_open = si.open;
+            if (ImGui::BeginTabItem(label.c_str(), &tab_open, ImGuiTabItemFlags_None)) {
+                active_session_idx_ = i;
+                ImGui::EndTabItem();
+            }
+            if (!tab_open && si.open) {
+                // User clicked close button — show confirmation dialog (D-42)
+                show_close_confirm_ = true;
+                close_confirm_idx_  = i;
+                si.open = true;  // keep open until confirmed
+            }
+        }
+
+        // D-43: "+" button at end of tab bar
+        if (ImGui::TabItemButton("+", ImGuiTabItemFlags_Trailing |
+                                       ImGuiTabItemFlags_NoTooltip)) {
+            create_session();
+        }
+
+        ImGui::EndTabBar();
+    }
+
+    // ---- Active session's views (scoped by session index for unique IDs, D-51) ----
+    ImGui::PushID(active_session_idx_);
     Session& s = active_session();
 
     // ---- Inner tab bar: show only when FTDC data is loaded (per D-06) ----
@@ -909,6 +942,7 @@ void App::render_dockspace() {
         s.ftdc_view.render(h);
     }
 
+    ImGui::PopID();  // PushID(active_session_idx_)
     ImGui::End();
 }
 
@@ -1102,6 +1136,34 @@ void App::render_frame() {
     render_loading_popup();
     prefs_view_.render();
     active_session().chat_view.render();
+
+    // ---- Close session confirmation dialog (D-42) ----
+    if (show_close_confirm_) {
+        ImGui::OpenPopup("##close_session_confirm");
+        show_close_confirm_ = false;
+    }
+    if (ImGui::BeginPopupModal("##close_session_confirm", nullptr,
+                                ImGuiWindowFlags_NoTitleBar |
+                                ImGuiWindowFlags_NoResize |
+                                ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Close session?");
+        ImGui::Separator();
+        ImGui::TextWrapped("Chat history and loaded data will be lost.");
+        ImGui::Spacing();
+
+        float btn_w = 80.0f;
+        if (ImGui::Button("Close", ImVec2(btn_w, 0))) {
+            close_session(close_confirm_idx_);
+            close_confirm_idx_ = -1;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(btn_w, 0))) {
+            close_confirm_idx_ = -1;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
 }
 
 // ------------------------------------------------------------
