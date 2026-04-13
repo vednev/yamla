@@ -112,7 +112,27 @@ Plans:
 Plans:
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
+### Phase 999.4: Multi-Select File Picker with Deselect Tags (BACKLOG)
+
+**Goal:** Add a multi-select file picker that lets users pick multiple files across different directories using a native or custom file dialog. Selected files appear as tag/chip boxes on screen, each with a small "x" button to deselect. This replaces the current drag-and-drop-only model with an explicit file picker alternative that gives users fine-grained control over which files to load.
+
+**Key Ideas:**
+- File picker button (or menu item) that opens a multi-select file dialog
+- Support picking files across different directories (log files + FTDC directories)
+- Selected files shown as tag/chip boxes (pill-shaped with filename + "x" close button)
+- Clicking "x" on a tag deselects that file (removes it from the pending load list)
+- Tags could appear in a horizontal flow area at the top of the window or in a sidebar
+- "Load" button to confirm and start loading all selected files
+- Consider: integrate with the multi-session tabs (999.2) — each selection set creates a session
+- Consider: remember recent file paths for quick re-selection
+
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
 ---
 
 *Roadmap created: 2026-04-12*
-*Updated: 2026-04-12 — Added backlog item 999.3 (chart layout modes)*
+*Updated: 2026-04-12 — Added backlog item 999.4 (multi-select file picker)*
