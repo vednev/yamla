@@ -862,6 +862,18 @@ void ChartPanelView::render_inner() {
                     ? (avail_w - (effective_cols - 1) * spacing) / effective_cols
                     : avail_w - spacing;
 
+                // Use ImGui::BeginTable for multi-column grid layout.
+                // SameLine() doesn't work with ImPlot charts because
+                // BeginPlot/EndPlot internally advances the cursor.
+                bool use_table = (effective_cols >= 2);
+                if (use_table) {
+                    ImGui::BeginTable("##chart_grid", effective_cols,
+                        ImGuiTableFlags_NoBordersInBody | ImGuiTableFlags_SizingFixedFit);
+                    for (int c = 0; c < effective_cols; ++c) {
+                        ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, chart_width);
+                    }
+                }
+
                 int col_idx = 0;
                 for (const auto& path : group_paths) {
                     const MetricSeries* ms = store_->get(path);
@@ -874,9 +886,9 @@ void ChartPanelView::render_inner() {
                         cit = chart_states_.emplace(path, cs).first;
                     }
 
-                    // In grid mode, place charts side-by-side using SameLine
-                    if (effective_cols >= 2 && col_idx > 0 && col_idx < effective_cols) {
-                        ImGui::SameLine(0, spacing);
+                    if (use_table) {
+                        if (col_idx == 0) ImGui::TableNextRow();
+                        ImGui::TableSetColumnIndex(col_idx);
                     }
 
                     render_chart(*ms, cit->second, chart_width, CHART_HEIGHT);
@@ -884,6 +896,10 @@ void ChartPanelView::render_inner() {
 
                     col_idx++;
                     if (col_idx >= effective_cols) col_idx = 0;
+                }
+
+                if (use_table) {
+                    ImGui::EndTable();
                 }
             }
 
@@ -922,6 +938,15 @@ void ChartPanelView::render_inner() {
                     ? (avail_w - (effective_cols - 1) * spacing) / effective_cols
                     : avail_w - spacing;
 
+                bool use_table = (effective_cols >= 2);
+                if (use_table) {
+                    ImGui::BeginTable("##custom_chart_grid", effective_cols,
+                        ImGuiTableFlags_NoBordersInBody | ImGuiTableFlags_SizingFixedFit);
+                    for (int c = 0; c < effective_cols; ++c) {
+                        ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, chart_width);
+                    }
+                }
+
                 int col_idx = 0;
                 for (const auto& path : *custom_metrics_) {
                     const MetricSeries* ms = store_->get(path);
@@ -934,8 +959,9 @@ void ChartPanelView::render_inner() {
                         cit = chart_states_.emplace(path, cs).first;
                     }
 
-                    if (effective_cols >= 2 && col_idx > 0 && col_idx < effective_cols) {
-                        ImGui::SameLine(0, spacing);
+                    if (use_table) {
+                        if (col_idx == 0) ImGui::TableNextRow();
+                        ImGui::TableSetColumnIndex(col_idx);
                     }
 
                     render_chart(*ms, cit->second, chart_width, CHART_HEIGHT);
@@ -943,6 +969,10 @@ void ChartPanelView::render_inner() {
 
                     col_idx++;
                     if (col_idx >= effective_cols) col_idx = 0;
+                }
+
+                if (use_table) {
+                    ImGui::EndTable();
                 }
             }
 
@@ -959,6 +989,15 @@ void ChartPanelView::render_inner() {
             ? (avail_w - (effective_cols - 1) * spacing) / effective_cols
             : avail_w - spacing;
 
+        bool use_table = (effective_cols >= 2);
+        if (use_table) {
+            ImGui::BeginTable("##flat_chart_grid", effective_cols,
+                ImGuiTableFlags_NoBordersInBody | ImGuiTableFlags_SizingFixedFit);
+            for (int c = 0; c < effective_cols; ++c) {
+                ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, chart_width);
+            }
+        }
+
         int col_idx = 0;
         for (const auto& path : *selected_) {
             const MetricSeries* ms = store_->get(path);
@@ -971,8 +1010,9 @@ void ChartPanelView::render_inner() {
                 it = chart_states_.emplace(path, cs).first;
             }
 
-            if (effective_cols >= 2 && col_idx > 0 && col_idx < effective_cols) {
-                ImGui::SameLine(0, spacing);
+            if (use_table) {
+                if (col_idx == 0) ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(col_idx);
             }
 
             render_chart(*ms, it->second, chart_width, CHART_HEIGHT);
@@ -980,6 +1020,10 @@ void ChartPanelView::render_inner() {
 
             col_idx++;
             if (col_idx >= effective_cols) col_idx = 0;
+        }
+
+        if (use_table) {
+            ImGui::EndTable();
         }
     }
 
