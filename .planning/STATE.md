@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-04-13T03:36:32.992Z"
+last_updated: "2026-04-13T03:41:39.189Z"
 last_activity: 2026-04-13
 progress:
   total_phases: 10
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 14
-  completed_plans: 9
-  percent: 64
+  completed_plans: 10
+  percent: 71
 ---
 
 # Project State
@@ -44,6 +44,7 @@ Next: Phase 5 (Multi-Session Tabs) — not yet started.
 - [Phase 03b-06]: MetricTreeView rewritten as dashboard-first panel with 15 toggle cards, anomaly badges, search overlay
 - [Phase 04-01]: List/Grid toggle toolbar + 2/3/4 column layout in ChartPanelView, chart_layout_columns pref field
 - [Phase 05-multi-session-tabs]: D-37/38: Extract ~20 session-specific members into Session struct; App holds vector<unique_ptr<Session>> and active_session_idx_
+- [Phase 05]: D-44: Smart drop routing with 4 rules — empty→fill, FTDC merge, logs→new tab, implicit fill
 
 ## Pending
 
