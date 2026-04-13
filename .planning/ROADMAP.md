@@ -151,7 +151,25 @@ Plans:
 Plans:
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
+### Phase 999.6: Dynamic Token Sizing for LLM Requests (BACKLOG)
+
+**Goal:** Remove the max tokens preference menu item and replace it with automatic, dynamic token sizing. The system should estimate how much data the user is sending to the AI agent (log context, FTDC summaries, conversation history) and adjust the max_tokens parameter accordingly to maximize response quality without requiring manual tuning.
+
+**Key Ideas:**
+- Remove the max_tokens slider/input from the preferences UI
+- Estimate input token count from: system prompt + conversation history + attached log/FTDC context
+- Set max_tokens = model_limit - estimated_input_tokens - safety_margin
+- Different models have different context windows — look up per-model limits
+- Consider: show a subtle indicator of "context budget used" so users understand when they're sending too much data
+- Consider: automatic context truncation strategies (summarize older messages, trim log context)
+
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
 ---
 
 *Roadmap created: 2026-04-12*
-*Updated: 2026-04-12 — Added backlog item 999.5 (empty state welcome screen)*
+*Updated: 2026-04-12 — Added backlog item 999.6 (dynamic token sizing)*
