@@ -532,9 +532,17 @@ void ChartPanelView::render_chart(const MetricSeries& series,
 
     if (ImPlot::BeginPlot(series.path.c_str(), ImVec2(width, chart_h), plot_flags))
     {
-        // X axis — linked across all charts, time-formatted tick labels
-        ImPlot::SetupAxis(ImAxis_X1, nullptr,
-            ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_NoHighlight);
+        // X axis — linked across all charts, time-formatted tick labels.
+        // In narrow column mode, reduce tick density to prevent label
+        // overflow beyond the plot frame.
+        ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoLabel
+                                | ImPlotAxisFlags_NoHighlight;
+        if (width < 350.0f) {
+            // Very narrow charts: hide tick labels entirely to prevent
+            // bleeding — time info is still on the first/wider charts
+            x_flags |= ImPlotAxisFlags_NoTickLabels;
+        }
+        ImPlot::SetupAxis(ImAxis_X1, nullptr, x_flags);
         ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Time);
         ImPlot::SetupAxisLimits(ImAxis_X1, x_view_min_, x_view_max_, ImGuiCond_Always);
 
