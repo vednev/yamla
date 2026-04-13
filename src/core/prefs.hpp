@@ -17,6 +17,9 @@ struct Prefs {
     std::string llm_model      = "claude-opus-4-6";                // model / deployment
     int         llm_max_tokens = 4096;                              // max response tokens
     std::string export_dir;                                         // directory for exported responses
+
+    // Chart layout: 0=auto-detect, 1=list, 2/3/4=column count
+    int         chart_layout_columns = 0;
 };
 
 // ------------------------------------------------------------

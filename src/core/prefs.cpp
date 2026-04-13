@@ -86,12 +86,15 @@ Prefs PrefsManager::load() {
     parse_str("\"llm_model\"",    p.llm_model);
     parse_int("\"llm_maxtok\"",   p.llm_max_tokens);
     parse_str("\"export_dir\"",   p.export_dir);
+    parse_int("\"chart_cols\"",  p.chart_layout_columns);
 
     // Clamp size to valid range
     if (p.font_size < 10) p.font_size = 10;
     if (p.font_size > 20) p.font_size = 20;
     if (p.llm_max_tokens < 256)  p.llm_max_tokens = 256;
     if (p.llm_max_tokens > 32768) p.llm_max_tokens = 32768;
+    if (p.chart_layout_columns < 0 || p.chart_layout_columns > 4)
+        p.chart_layout_columns = 0;
 
     return p;
 }
@@ -114,12 +117,12 @@ void PrefsManager::save(const Prefs& p) {
         "{\"font\":\"%s\",\"size\":%d,\"mem_gb\":%d,\"ckbox\":%d,"
         "\"llm_key\":\"%s\",\"llm_endpoint\":\"%s\","
         "\"llm_model\":\"%s\",\"llm_maxtok\":%d,"
-        "\"export_dir\":\"%s\"}\n",
+        "\"export_dir\":\"%s\",\"chart_cols\":%d}\n",
         json_escape(p.font_name).c_str(), p.font_size, p.memory_limit_gb,
         p.prefer_checkboxes ? 1 : 0,
         json_escape(p.llm_api_key).c_str(), json_escape(p.llm_endpoint).c_str(),
         json_escape(p.llm_model).c_str(), p.llm_max_tokens,
-        json_escape(p.export_dir).c_str());
+        json_escape(p.export_dir).c_str(), p.chart_layout_columns);
     std::fclose(f);
 
 #if !defined(_WIN32)
