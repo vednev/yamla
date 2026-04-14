@@ -614,8 +614,8 @@ void ChartPanelView::render_chart(const MetricSeries& series,
             // transparent at threshold → semi-transparent red at top.
             // Uses GetPlotDrawList for per-vertex color gradient.
             ImDrawList* dl = ImPlot::GetPlotDrawList();
-            ImVec2 p_lo = ImPlot::PlotToPixels(plot_x.front(), thresh);
-            ImVec2 p_hi = ImPlot::PlotToPixels(plot_x.back(),  y_hi);
+            ImVec2 p_lo = ImPlot::PlotToPixels(x_view_min_, thresh);
+            ImVec2 p_hi = ImPlot::PlotToPixels(x_view_max_, y_hi);
             ImU32 col_bottom = IM_COL32(255, 60, 60, 0);   // transparent at threshold
             ImU32 col_top    = IM_COL32(255, 60, 60, 50);  // semi-transparent red at top
             dl->AddRectFilledMultiColor(
