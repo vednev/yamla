@@ -20,6 +20,22 @@ static constexpr ImVec4 COL_ANNOTATION_ERR = ImVec4(1.0f, 0.3f, 0.3f, 0.80f);
 static constexpr ImVec4 COL_ANNOTATION_WARN= ImVec4(1.0f, 0.8f, 0.0f, 0.80f);
 static constexpr ImVec4 COL_STATS          = ImVec4(0.55f, 0.55f, 0.55f, 1.0f);
 
+// Stats row threshold color-coding (D-86)
+static constexpr ImVec4 COL_STAT_GREEN  = ImVec4(0.4f, 0.9f, 0.4f, 1.0f);
+static constexpr ImVec4 COL_STAT_YELLOW = ImVec4(0.9f, 0.9f, 0.2f, 1.0f);
+static constexpr ImVec4 COL_STAT_RED    = ImVec4(0.9f, 0.3f, 0.3f, 1.0f);
+
+// Return the appropriate color for a stat value relative to a threshold.
+// No threshold (NaN) → default gray; <75% → green; 75-100% → yellow; >100% → red.
+static ImVec4 stat_color(double value, double threshold) {
+    if (std::isnan(threshold)) return COL_STATS;
+    if (threshold == 0.0)      return (value > 0.0) ? COL_STAT_RED : COL_STAT_GREEN;
+    double ratio = value / threshold;
+    if (ratio > 1.0)  return COL_STAT_RED;
+    if (ratio >= 0.75) return COL_STAT_YELLOW;
+    return COL_STAT_GREEN;
+}
+
 // Convert epoch ms to ImPlot double (ImPlot's date axis uses seconds)
 static double ms_to_plot(int64_t ms) {
     return static_cast<double>(ms) / 1000.0;
@@ -353,14 +369,44 @@ void ChartPanelView::render_stats_row(const MetricSeries& series,
     if (!ws.valid) return;
 
     const std::string& unit = series.unit;
+    double thresh = metric_threshold(series.path);
+
     char min_s[32], avg_s[32], max_s[32], p99_s[32];
     fmt_metric_value(min_s, sizeof(min_s), ws.min, unit);
     fmt_metric_value(avg_s, sizeof(avg_s), ws.avg, unit);
     fmt_metric_value(max_s, sizeof(max_s), ws.max, unit);
     fmt_metric_value(p99_s, sizeof(p99_s), ws.p99, unit);
 
+    // Color-coded stats: green/yellow/red relative to threshold (D-85/D-86)
+    ImGui::Text("  ");
+    ImGui::SameLine(0, 0);
+
     ImGui::PushStyleColor(ImGuiCol_Text, COL_STATS);
-    ImGui::Text("  min: %s  avg: %s  max: %s  p99: %s", min_s, avg_s, max_s, p99_s);
+    ImGui::Text("min: "); ImGui::SameLine(0, 0);
+    ImGui::PopStyleColor();
+    ImGui::PushStyleColor(ImGuiCol_Text, stat_color(ws.min, thresh));
+    ImGui::Text("%s", min_s); ImGui::SameLine(0, 0);
+    ImGui::PopStyleColor();
+
+    ImGui::PushStyleColor(ImGuiCol_Text, COL_STATS);
+    ImGui::Text("  avg: "); ImGui::SameLine(0, 0);
+    ImGui::PopStyleColor();
+    ImGui::PushStyleColor(ImGuiCol_Text, stat_color(ws.avg, thresh));
+    ImGui::Text("%s", avg_s); ImGui::SameLine(0, 0);
+    ImGui::PopStyleColor();
+
+    ImGui::PushStyleColor(ImGuiCol_Text, COL_STATS);
+    ImGui::Text("  max: "); ImGui::SameLine(0, 0);
+    ImGui::PopStyleColor();
+    ImGui::PushStyleColor(ImGuiCol_Text, stat_color(ws.max, thresh));
+    ImGui::Text("%s", max_s); ImGui::SameLine(0, 0);
+    ImGui::PopStyleColor();
+
+    ImGui::PushStyleColor(ImGuiCol_Text, COL_STATS);
+    ImGui::Text("  p99: "); ImGui::SameLine(0, 0);
+    ImGui::PopStyleColor();
+    ImGui::PushStyleColor(ImGuiCol_Text, stat_color(ws.p99, thresh));
+    ImGui::Text("%s", p99_s);
     ImGui::PopStyleColor();
 }
 
