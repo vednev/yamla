@@ -185,7 +185,7 @@ void Cluster::load() {
         for (uint16_t i = 0; i < n; ++i) {
             nodes_[i].idx   = i;
             nodes_[i].path  = file_paths_[i];
-            nodes_[i].color = pastel_color(i, n);
+            nodes_[i].color = node_color(i);
         }
 
         // Parse each file
@@ -269,13 +269,11 @@ void Cluster::append_files(const std::vector<std::string>& new_paths) {
             uint16_t ni = old_node_count + i;
             nodes_[ni].idx   = ni;
             nodes_[ni].path  = new_paths[i];
-            nodes_[ni].color = pastel_color(ni, total_nodes);
+            nodes_[ni].color = node_color(ni);
         }
 
-        // Reassign colours for existing nodes so they're evenly spaced
-        // across the new total count
-        for (uint16_t i = 0; i < old_node_count; ++i)
-            nodes_[i].color = pastel_color(i, total_nodes);
+        // No need to reassign existing node colours — they are
+        // stable per-index with the fixed categorical palette.
 
         // Also track new paths in file_paths_
         for (const auto& p : new_paths)

@@ -16,33 +16,31 @@
 #include "analyzer.hpp"
 
 // ------------------------------------------------------------
-//  NodeColor — pastel RGBA assigned per cluster node
+//  NodeColor — fixed categorical RGBA assigned per cluster node
 // ------------------------------------------------------------
 struct NodeColor {
     float r, g, b, a;
 };
 
-inline NodeColor pastel_color(uint16_t node_idx, uint16_t total_nodes) {
-    float h = (total_nodes > 0)
-              ? (static_cast<float>(node_idx) / static_cast<float>(total_nodes))
-              : 0.0f;
-    constexpr float s = 0.55f, l = 0.75f;
-    auto hue2rgb = [](float p, float q, float t) -> float {
-        if (t < 0) t += 1;
-        if (t > 1) t -= 1;
-        if (t < 1.0f/6) return p + (q - p) * 6 * t;
-        if (t < 1.0f/2) return q;
-        if (t < 2.0f/3) return p + (q - p) * (2.0f/3 - t) * 6;
-        return p;
+// Fixed 12-colour palette — node 0 is always sky blue, node 1
+// always orange, etc.  Stable regardless of total node count.
+inline NodeColor node_color(uint16_t node_idx) {
+    static constexpr NodeColor palette[] = {
+        {0.302f, 0.788f, 0.965f, 1.0f},  // #4dc9f6 sky blue
+        {0.965f, 0.439f, 0.098f, 1.0f},  // #f67019 orange
+        {0.659f, 0.878f, 0.373f, 1.0f},  // #a8e05f lime green
+        {0.910f, 0.365f, 0.459f, 1.0f},  // #e85d75 rose red
+        {0.769f, 0.565f, 0.820f, 1.0f},  // #c490d1 lavender
+        {0.965f, 0.788f, 0.267f, 1.0f},  // #f6c944 gold
+        {0.341f, 0.769f, 0.725f, 1.0f},  // #57c4b9 teal
+        {1.000f, 0.624f, 0.953f, 1.0f},  // #ff9ff3 pink
+        {0.471f, 0.820f, 0.714f, 1.0f},  // #78d1b6 mint
+        {0.769f, 0.639f, 0.353f, 1.0f},  // #c4a35a amber
+        {0.486f, 0.549f, 0.961f, 1.0f},  // #7c8cf5 periwinkle
+        {0.886f, 0.886f, 0.612f, 1.0f},  // #e2e29c pastel yellow
     };
-    float q = (l < 0.5f) ? (l * (1 + s)) : (l + s - l * s);
-    float p = 2 * l - q;
-    return {
-        hue2rgb(p, q, h + 1.0f/3),
-        hue2rgb(p, q, h),
-        hue2rgb(p, q, h - 1.0f/3),
-        1.0f
-    };
+    constexpr uint16_t N = sizeof(palette) / sizeof(palette[0]);
+    return palette[node_idx % N];
 }
 
 // ------------------------------------------------------------
