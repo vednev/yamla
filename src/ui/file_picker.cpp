@@ -50,6 +50,22 @@ static bool fp_path_is_directory(const std::string& path) {
 // ------------------------------------------------------------
 //  count_log_files_in_dir
 // ------------------------------------------------------------
+// Check if a filename looks like a MongoDB log file.
+// Matches: .log, .json (exact extension), and also rotated logs
+// like mongod.log.2024-01-15T00-00-00 (contain ".log." in name).
+static bool is_log_filename(const std::string& name) {
+    // Check for exact .log or .json extension
+    size_t dot = name.rfind('.');
+    if (dot != std::string::npos) {
+        std::string ext = name.substr(dot);
+        if (ext == ".log" || ext == ".json") return true;
+    }
+    // Check for rotated logs: name contains ".log." (e.g., mongod.log.2024-01-15)
+    if (name.find(".log.") != std::string::npos) return true;
+    if (name.find(".json.") != std::string::npos) return true;
+    return false;
+}
+
 static int fp_count_log_files(const std::string& dir_path) {
     std::string dp = dir_path;
     while (dp.size() > 1 && (dp.back() == '/' || dp.back() == '\\'))
@@ -64,11 +80,7 @@ static int fp_count_log_files(const std::string& dir_path) {
     do {
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
         std::string name(fd.cFileName);
-        size_t dot = name.rfind('.');
-        if (dot != std::string::npos) {
-            std::string ext = name.substr(dot);
-            if (ext == ".log" || ext == ".json") ++count;
-        }
+        if (is_log_filename(name)) ++count;
     } while (FindNextFileA(hFind, &fd));
     FindClose(hFind);
 #else
@@ -81,11 +93,7 @@ static int fp_count_log_files(const std::string& dir_path) {
         struct stat st{};
         if (stat(full.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) continue;
         std::string name(ent->d_name);
-        size_t dot = name.rfind('.');
-        if (dot != std::string::npos) {
-            std::string ext = name.substr(dot);
-            if (ext == ".log" || ext == ".json") ++count;
-        }
+        if (is_log_filename(name)) ++count;
     }
     closedir(d);
 #endif
@@ -109,12 +117,8 @@ static std::vector<std::string> fp_collect_log_files(const std::string& dir_path
     do {
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
         std::string name(fd.cFileName);
-        size_t dot = name.rfind('.');
-        if (dot != std::string::npos) {
-            std::string ext = name.substr(dot);
-            if (ext == ".log" || ext == ".json")
-                files.push_back(dp + "\\" + name);
-        }
+        if (is_log_filename(name))
+            files.push_back(dp + "\\" + name);
     } while (FindNextFileA(hFind, &fd));
     FindClose(hFind);
 #else
@@ -127,12 +131,8 @@ static std::vector<std::string> fp_collect_log_files(const std::string& dir_path
         struct stat st{};
         if (stat(full.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) continue;
         std::string name(ent->d_name);
-        size_t dot = name.rfind('.');
-        if (dot != std::string::npos) {
-            std::string ext = name.substr(dot);
-            if (ext == ".log" || ext == ".json")
-                files.push_back(full);
-        }
+        if (is_log_filename(name))
+            files.push_back(full);
     }
     closedir(d);
 #endif
