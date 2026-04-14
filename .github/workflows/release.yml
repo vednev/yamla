@@ -40,7 +40,7 @@ jobs:
         run: |
           VERSION="${{ github.ref_name }}"
           ARCHIVE="yamla-${VERSION}-macos-arm64.tar.gz"
-          tar -czf "$ARCHIVE" yamla vendor/fonts README.md
+          tar -czf "$ARCHIVE" yamla vendor/fonts knowledge README.md
           echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
 
       - name: Upload artifact
@@ -87,7 +87,7 @@ jobs:
         run: |
           VERSION="${{ github.ref_name }}"
           ARCHIVE="yamla-${VERSION}-linux-amd64.tar.gz"
-          tar -czf "$ARCHIVE" yamla vendor/fonts README.md
+          tar -czf "$ARCHIVE" yamla vendor/fonts knowledge README.md
           echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
 
       - name: Upload artifact
@@ -135,7 +135,7 @@ jobs:
         run: |
           VERSION="${{ github.ref_name }}"
           ARCHIVE="yamla-${VERSION}-linux-arm64.tar.gz"
-          tar -czf "$ARCHIVE" yamla vendor/fonts README.md
+          tar -czf "$ARCHIVE" yamla vendor/fonts knowledge README.md
           echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
 
       - name: Upload artifact
@@ -171,9 +171,9 @@ jobs:
           body: |
             ## YAMLA ${{ github.ref_name }}
 
-            Fast MongoDB log analyzer. Drop `mongod` 4.4+ structured JSON log files onto the window to begin.
+            Fast MongoDB log analyzer and FTDC metric visualizer. Drop `mongod` 4.4+ structured JSON log files or FTDC `diagnostic.data` directories onto the window to begin.
 
-            > **Supported:** `mongod` server logs only. Not compatible with agent logs, Ops Manager logs, or FTDC files.
+            > **Supported:** `mongod` server logs and FTDC diagnostic data files. Not compatible with agent logs, Ops Manager logs, or `mongos` router logs.
 
             ### Downloads
 
@@ -183,7 +183,7 @@ jobs:
             | Linux x86\_64 | `yamla-${{ github.ref_name }}-linux-amd64.tar.gz` |
             | Linux arm64 | `yamla-${{ github.ref_name }}-linux-arm64.tar.gz` |
 
-            Each archive contains the `yamla` binary, bundled fonts (`vendor/fonts/`), and `README.md`.
+            Each archive contains the `yamla` binary, bundled fonts (`vendor/fonts/`), knowledge files (`knowledge/`), and `README.md`.
 
             ### Runtime requirements
 
