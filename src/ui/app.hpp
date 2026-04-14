@@ -89,9 +89,9 @@ struct Session {
 // ------------------------------------------------------------
 struct PendingPick {
     std::string path;        // absolute filesystem path
-    std::string label;       // display label (e.g. "FTDC: diagnostic.data", "LOG: mongod.log")
+    std::string label;       // display label (e.g. "FTDC: diagnostic.data", "FILE: mongod.log")
     bool        is_ftdc;     // true if this is an FTDC directory/file
-    int         file_count;  // for log directories: number of .log/.json files found
+    int         file_count;  // for directories: number of non-hidden files found
 };
 
 // ------------------------------------------------------------
@@ -190,6 +190,10 @@ private:
     // Close confirmation dialog state (D-42)
     bool  show_close_confirm_ = false;
     int   close_confirm_idx_  = -1;
+
+    // Parse error popup state — shown when files fail to parse after loading
+    bool                     show_parse_errors_  = false;
+    std::vector<std::string> parse_error_files_;
 
     // Custom ImGui file picker (replaces native NFD dialogs)
     FilePicker file_picker_;

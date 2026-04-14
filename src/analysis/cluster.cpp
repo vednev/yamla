@@ -195,10 +195,12 @@ void Cluster::load() {
         LogParser parser(*strings_, cfg);
 
         float file_weight = 1.0f / static_cast<float>(n);
+        failed_files_.clear();
 
         for (uint16_t i = 0; i < n; ++i) {
             // Open, parse, then drop the mmap (detail view re-opens on demand)
             {
+                size_t entries_before = entries_->size();
                 MmapFile file(file_paths_[i]);
                 nodes_[i].hostname = infer_hostname(file, file_paths_[i]);
 
@@ -212,6 +214,22 @@ void Cluster::load() {
                     });
                 // MmapFile destructs here — closes the mmap.
                 // The detail view will re-open the file on demand.
+
+                // Track files that produced zero entries (not valid log format)
+                if (entries_->size() == entries_before && file.size() > 0) {
+                    // Extract basename for display
+                    const std::string& p = file_paths_[i];
+                    size_t slash = p.rfind('/');
+#if defined(_WIN32)
+                    size_t bslash = p.rfind('\\');
+                    if (bslash != std::string::npos &&
+                        (slash == std::string::npos || bslash > slash))
+                        slash = bslash;
+#endif
+                    std::string basename = (slash != std::string::npos)
+                                           ? p.substr(slash + 1) : p;
+                    failed_files_.push_back(std::move(basename));
+                }
             }
         }
 
@@ -289,6 +307,7 @@ void Cluster::append_files(const std::vector<std::string>& new_paths) {
         for (uint16_t i = 0; i < new_count; ++i) {
             uint16_t ni = old_node_count + i;
             {
+                size_t entries_before = entries_->size();
                 MmapFile file(new_paths[i]);
                 nodes_[ni].hostname = infer_hostname(file, new_paths[i]);
 
@@ -300,6 +319,21 @@ void Cluster::append_files(const std::vector<std::string>& new_paths) {
                                      : 1.0f;
                         progress_.store(base + frac * file_weight);
                     });
+
+                // Track files that produced zero entries
+                if (entries_->size() == entries_before && file.size() > 0) {
+                    const std::string& p = new_paths[i];
+                    size_t slash = p.rfind('/');
+#if defined(_WIN32)
+                    size_t bslash = p.rfind('\\');
+                    if (bslash != std::string::npos &&
+                        (slash == std::string::npos || bslash > slash))
+                        slash = bslash;
+#endif
+                    std::string basename = (slash != std::string::npos)
+                                           ? p.substr(slash + 1) : p;
+                    failed_files_.push_back(std::move(basename));
+                }
             }
         }
 

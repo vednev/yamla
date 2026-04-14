@@ -1266,6 +1266,13 @@ void App::render_frame() {
                 for (size_t i = 0; i < entries.size(); ++i)
                     s.log_entry_ptrs.push_back(&entries[i]);
                 s.ftdc_view.set_log_data(&s.log_entry_ptrs, &s.cluster->strings());
+
+                // Check for files that failed to parse (active session only)
+                if (&s == &active_session() &&
+                    !s.cluster->failed_files().empty()) {
+                    parse_error_files_ = s.cluster->failed_files();
+                    show_parse_errors_ = true;
+                }
             }
             s.last_cluster_state = cur;
         }
@@ -1349,6 +1356,43 @@ void App::render_frame() {
 
             ImGui::EndPopup();
         }
+    }
+
+    // ---- Parse error popup — shown when files fail to parse ----
+    if (show_parse_errors_) {
+        ImGui::OpenPopup("##parse_errors");
+        show_parse_errors_ = false;
+    }
+    if (ImGui::BeginPopupModal("##parse_errors", nullptr,
+                                ImGuiWindowFlags_NoTitleBar |
+                                ImGuiWindowFlags_NoResize |
+                                ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.55f, 0.0f, 1.0f));
+        ImGui::Text("Some files could not be parsed:");
+        ImGui::PopStyleColor();
+
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        for (const auto& name : parse_error_files_) {
+            ImGui::BulletText("%s", name.c_str());
+        }
+
+        ImGui::Spacing();
+        ImGui::TextDisabled("These files are not valid MongoDB JSON log format.");
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        float btn_w = 120.0f;
+        ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - btn_w) * 0.5f
+                             + ImGui::GetCursorPosX());
+        if (ImGui::Button("OK", ImVec2(btn_w, 0))) {
+            parse_error_files_.clear();
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
     }
 
     render_dockspace();

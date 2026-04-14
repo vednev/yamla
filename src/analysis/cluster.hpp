@@ -105,6 +105,9 @@ public:
     const AnalysisResult&        analysis() const { return analysis_; }
     const std::vector<NodeInfo>& nodes()    const { return nodes_; }
 
+    // Files that produced zero parsed entries (not valid log format)
+    const std::vector<std::string>& failed_files() const { return failed_files_; }
+
     // For stacked (deduped) entries: get the raw file position for a
     // specific node. Returns true if found; fills out_offset/out_len.
     // If node_idx matches the entry's own node_idx, simply returns
@@ -130,6 +133,7 @@ private:
 
     std::vector<std::string>  file_paths_;
     std::vector<NodeInfo>     nodes_;
+    std::vector<std::string>  failed_files_;
     AnalysisResult            analysis_;
 
     // Per-node raw positions for deduped/stacked entries.

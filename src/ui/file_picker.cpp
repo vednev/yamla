@@ -48,25 +48,9 @@ static bool fp_path_is_directory(const std::string& path) {
 }
 
 // ------------------------------------------------------------
-//  count_log_files_in_dir
+//  count_files_in_dir — count ALL non-hidden, non-directory files
 // ------------------------------------------------------------
-// Check if a filename looks like a MongoDB log file.
-// Matches: .log, .json (exact extension), and also rotated logs
-// like mongod.log.2024-01-15T00-00-00 (contain ".log." in name).
-static bool is_log_filename(const std::string& name) {
-    // Check for exact .log or .json extension
-    size_t dot = name.rfind('.');
-    if (dot != std::string::npos) {
-        std::string ext = name.substr(dot);
-        if (ext == ".log" || ext == ".json") return true;
-    }
-    // Check for rotated logs: name contains ".log." (e.g., mongod.log.2024-01-15)
-    if (name.find(".log.") != std::string::npos) return true;
-    if (name.find(".json.") != std::string::npos) return true;
-    return false;
-}
-
-static int fp_count_log_files(const std::string& dir_path) {
+static int fp_count_files(const std::string& dir_path) {
     std::string dp = dir_path;
     while (dp.size() > 1 && (dp.back() == '/' || dp.back() == '\\'))
         dp.pop_back();
@@ -80,7 +64,8 @@ static int fp_count_log_files(const std::string& dir_path) {
     do {
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
         std::string name(fd.cFileName);
-        if (is_log_filename(name)) ++count;
+        if (!name.empty() && name[0] == '.') continue;
+        ++count;
     } while (FindNextFileA(hFind, &fd));
     FindClose(hFind);
 #else
@@ -92,8 +77,7 @@ static int fp_count_log_files(const std::string& dir_path) {
         std::string full = dp + "/" + ent->d_name;
         struct stat st{};
         if (stat(full.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) continue;
-        std::string name(ent->d_name);
-        if (is_log_filename(name)) ++count;
+        ++count;
     }
     closedir(d);
 #endif
@@ -101,9 +85,9 @@ static int fp_count_log_files(const std::string& dir_path) {
 }
 
 // ------------------------------------------------------------
-//  collect_log_files_in_dir
+//  collect_files_in_dir — collect ALL non-hidden, non-directory file paths
 // ------------------------------------------------------------
-static std::vector<std::string> fp_collect_log_files(const std::string& dir_path) {
+static std::vector<std::string> fp_collect_files(const std::string& dir_path) {
     std::string dp = dir_path;
     while (dp.size() > 1 && (dp.back() == '/' || dp.back() == '\\'))
         dp.pop_back();
@@ -117,8 +101,8 @@ static std::vector<std::string> fp_collect_log_files(const std::string& dir_path
     do {
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
         std::string name(fd.cFileName);
-        if (is_log_filename(name))
-            files.push_back(dp + "\\" + name);
+        if (!name.empty() && name[0] == '.') continue;
+        files.push_back(dp + "\\" + name);
     } while (FindNextFileA(hFind, &fd));
     FindClose(hFind);
 #else
@@ -130,9 +114,7 @@ static std::vector<std::string> fp_collect_log_files(const std::string& dir_path
         std::string full = dp + "/" + ent->d_name;
         struct stat st{};
         if (stat(full.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) continue;
-        std::string name(ent->d_name);
-        if (is_log_filename(name))
-            files.push_back(full);
+        files.push_back(full);
     }
     closedir(d);
 #endif
@@ -313,14 +295,14 @@ void FilePicker::add_selected() {
             picks_.end());
         pick.label = "FTDC: " + e.name;
     } else if (e.is_dir) {
-        int n = fp_count_log_files(e.full_path);
+        int n = fp_count_files(e.full_path);
         pick.file_count = n;
         if (n > 0)
-            pick.label = "LOGS: " + std::to_string(n) + " files";
+            pick.label = "FILES: " + std::to_string(n) + " files";
         else
             pick.label = "DIR: " + e.name + " (empty)";
     } else {
-        pick.label = "LOG: " + e.name;
+        pick.label = "FILE: " + e.name;
     }
 
     picks_.push_back(std::move(pick));
@@ -354,10 +336,10 @@ void FilePicker::add_directory() {
             picks_.end());
         pick.label = "FTDC: " + e.name;
     } else {
-        int n = fp_count_log_files(e.full_path);
+        int n = fp_count_files(e.full_path);
         pick.file_count = n;
         if (n > 0)
-            pick.label = "LOGS: " + std::to_string(n) + " files";
+            pick.label = "FILES: " + std::to_string(n) + " files";
         else
             pick.label = "DIR: " + e.name + " (empty)";
     }
@@ -605,7 +587,7 @@ bool FilePicker::render() {
                     if (pick.is_ftdc) {
                         result_paths_.push_back(pick.path);
                     } else if (fp_path_is_directory(pick.path)) {
-                        auto files = fp_collect_log_files(pick.path);
+                        auto files = fp_collect_files(pick.path);
                         for (auto& f : files)
                             result_paths_.push_back(std::move(f));
                     } else {
