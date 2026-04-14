@@ -38,6 +38,12 @@
 #include <nfd.hpp>
 #include <nfd_sdl2.h>
 
+// Directory scanning for log file discovery (D-78)
+#if !defined(_WIN32)
+#   include <dirent.h>
+#   include <sys/stat.h>
+#endif
+
 // ---- Windows DX11 helpers ----------------------------------
 #if defined(_WIN32)
 static bool create_dx11_device(HWND hwnd,
@@ -585,6 +591,149 @@ static bool is_ftdc_path(const std::string& path) {
     return basename.size() >= 7 && basename.substr(0, 7) == "metrics";
 }
 
+// Check if a path is a directory (D-78)
+static bool path_is_directory(const std::string& path) {
+#if defined(_WIN32)
+    DWORD attr = GetFileAttributesA(path.c_str());
+    return (attr != INVALID_FILE_ATTRIBUTES) && (attr & FILE_ATTRIBUTE_DIRECTORY);
+#else
+    struct stat st{};
+    if (stat(path.c_str(), &st) != 0) return false;
+    return S_ISDIR(st.st_mode);
+#endif
+}
+
+// Count .log and .json files in a directory (D-78)
+static int count_log_files_in_dir(const std::string& dir_path) {
+    // Normalize: strip trailing slash if present (NFD may add one)
+    std::string dp = dir_path;
+    while (dp.size() > 1 && (dp.back() == '/' || dp.back() == '\\'))
+        dp.pop_back();
+
+    int count = 0;
+#if defined(_WIN32)
+    std::string pattern = dp + "\\*";
+    WIN32_FIND_DATAA fd;
+    HANDLE hFind = FindFirstFileA(pattern.c_str(), &fd);
+    if (hFind == INVALID_HANDLE_VALUE) return 0;
+    do {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+        std::string name(fd.cFileName);
+        size_t dot = name.rfind('.');
+        if (dot != std::string::npos) {
+            std::string ext = name.substr(dot);
+            if (ext == ".log" || ext == ".json") ++count;
+        }
+    } while (FindNextFileA(hFind, &fd));
+    FindClose(hFind);
+#else
+    DIR* d = opendir(dp.c_str());
+    if (!d) return 0;
+    struct dirent* ent;
+    while ((ent = readdir(d)) != nullptr) {
+        if (ent->d_name[0] == '.') continue;
+        // Skip subdirectories — only count regular files
+        std::string full = dp + "/" + ent->d_name;
+        struct stat st{};
+        if (stat(full.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) continue;
+        std::string name(ent->d_name);
+        size_t dot = name.rfind('.');
+        if (dot != std::string::npos) {
+            std::string ext = name.substr(dot);
+            if (ext == ".log" || ext == ".json") ++count;
+        }
+    }
+    closedir(d);
+#endif
+    return count;
+}
+
+// Collect .log and .json file paths from a directory (D-78)
+static std::vector<std::string> collect_log_files_in_dir(const std::string& dir_path) {
+    // Normalize: strip trailing slash
+    std::string dp = dir_path;
+    while (dp.size() > 1 && (dp.back() == '/' || dp.back() == '\\'))
+        dp.pop_back();
+
+    std::vector<std::string> files;
+#if defined(_WIN32)
+    std::string pattern = dp + "\\*";
+    WIN32_FIND_DATAA fd;
+    HANDLE hFind = FindFirstFileA(pattern.c_str(), &fd);
+    if (hFind == INVALID_HANDLE_VALUE) return files;
+    do {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+        std::string name(fd.cFileName);
+        size_t dot = name.rfind('.');
+        if (dot != std::string::npos) {
+            std::string ext = name.substr(dot);
+            if (ext == ".log" || ext == ".json")
+                files.push_back(dp + "\\" + name);
+        }
+    } while (FindNextFileA(hFind, &fd));
+    FindClose(hFind);
+#else
+    DIR* d = opendir(dp.c_str());
+    if (!d) return files;
+    struct dirent* ent;
+    while ((ent = readdir(d)) != nullptr) {
+        if (ent->d_name[0] == '.') continue;
+        // Skip subdirectories — only collect regular files
+        std::string full = dp + "/" + ent->d_name;
+        struct stat st{};
+        if (stat(full.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) continue;
+        std::string name(ent->d_name);
+        size_t dot = name.rfind('.');
+        if (dot != std::string::npos) {
+            std::string ext = name.substr(dot);
+            if (ext == ".log" || ext == ".json")
+                files.push_back(full);
+        }
+    }
+    closedir(d);
+#endif
+    std::sort(files.begin(), files.end());
+    return files;
+}
+
+// Extract basename from path (D-78)
+static std::string path_basename(const std::string& path) {
+    auto sep = path.rfind('/');
+#if defined(_WIN32)
+    auto sep2 = path.rfind('\\');
+    if (sep2 != std::string::npos && (sep == std::string::npos || sep2 > sep))
+        sep = sep2;
+#endif
+    return (sep != std::string::npos && sep + 1 < path.size())
+               ? path.substr(sep + 1)
+               : path;
+}
+
+// Build a PendingPick from a path, classifying it as FTDC/LOG/LOGS (D-78)
+static PendingPick classify_pick(const std::string& path) {
+    PendingPick pick;
+    pick.path = path;
+    pick.is_ftdc = is_ftdc_path(path);
+    pick.file_count = 1;
+
+    std::string basename = path_basename(path);
+
+    if (pick.is_ftdc) {
+        pick.label = "FTDC: " + basename;
+    } else if (path_is_directory(path)) {
+        int n = count_log_files_in_dir(path);
+        pick.file_count = n;
+        if (n > 0) {
+            pick.label = "LOGS: " + std::to_string(n) + " files";
+        } else {
+            pick.label = "DIR: " + basename + " (empty)";
+        }
+    } else {
+        pick.label = "LOG: " + basename;
+    }
+    return pick;
+}
+
 // ------------------------------------------------------------
 //  handle_drop — smart routing (D-44)
 //
@@ -607,53 +756,59 @@ void App::handle_drop(const std::vector<std::string>& paths) {
     }
     PrefsManager::save(prefs_);
 
-    Session& s = active_session();
-    bool is_ftdc = is_ftdc_path(paths[0]);
+    // Split paths into FTDC and log groups.  The Load button (and drag-and-drop)
+    // can produce mixed lists.  Handle each group with the smart routing rules.
+    std::vector<std::string> ftdc_paths;
+    std::vector<std::string> log_paths;
+    for (const auto& p : paths) {
+        if (is_ftdc_path(p))
+            ftdc_paths.push_back(p);
+        else
+            log_paths.push_back(p);
+    }
 
-    // D-44 rule 1: If active session has no data (empty), add files to it
+    Session& s = active_session();
     bool session_empty = (!s.cluster || s.cluster->state() == LoadState::Idle)
                       && s.ftdc_view.load_state() == FtdcLoadState::Idle;
-    if (session_empty) {
-        if (is_ftdc) {
-            s.ftdc_view.start_load(paths[0]);
+
+    // --- Handle FTDC (at most 1 per session) ---
+    if (!ftdc_paths.empty()) {
+        const std::string& ftdc = ftdc_paths[0]; // only 1 FTDC per session
+        bool has_ftdc = s.ftdc_view.load_state() != FtdcLoadState::Idle;
+        if (session_empty || !has_ftdc) {
+            // Load FTDC into current session
+            s.ftdc_view.start_load(ftdc);
             s.active_tab = 1;
             s.force_tab_switch = true;
         } else {
-            start_load(paths);
+            // Session already has FTDC → new tab for FTDC only
+            create_session();
+            active_session().ftdc_view.start_load(ftdc);
+            active_session().active_tab = 1;
+            active_session().force_tab_switch = true;
         }
-        return;
     }
 
-    // D-44 rule 2: Dropping FTDC onto a session with logs but no FTDC → merge
-    if (is_ftdc) {
-        bool has_logs = s.cluster && s.cluster->state() == LoadState::Ready;
-        bool has_ftdc = s.ftdc_view.load_state() != FtdcLoadState::Idle;
-        if (has_logs && !has_ftdc) {
-            // Merge FTDC into current session (creates combined log+FTDC session)
-            s.ftdc_view.start_load(paths[0]);
-            s.active_tab = 1;
-            s.force_tab_switch = true;
-            return;
+    // --- Handle log files ---
+    if (!log_paths.empty()) {
+        // Re-fetch session (may have changed if FTDC created a new tab above)
+        Session& ls = active_session();
+        bool log_session_empty = (!ls.cluster || ls.cluster->state() == LoadState::Idle);
+        bool has_logs = ls.cluster && (ls.cluster->state() == LoadState::Ready ||
+                                        ls.cluster->state() == LoadState::Loading);
+
+        if (log_session_empty) {
+            // D-44 rule 1/4: session has no logs → load into it
+            start_load(log_paths);
+        } else if (has_logs) {
+            // D-44 rule 3: session already has logs → new tab
+            create_session();
+            start_load(log_paths);
+        } else {
+            // Fallback: load into current session
+            start_load(log_paths);
         }
-        // FTDC onto session that already has FTDC → new tab
-        create_session();
-        active_session().ftdc_view.start_load(paths[0]);
-        active_session().active_tab = 1;
-        active_session().force_tab_switch = true;
-        return;
     }
-
-    // D-44 rule 3: Dropping log files onto session that already has logs → new tab
-    bool has_logs = s.cluster && (s.cluster->state() == LoadState::Ready ||
-                                   s.cluster->state() == LoadState::Loading);
-    if (has_logs) {
-        create_session();
-        start_load(paths);  // start_load operates on the newly-active session
-        return;
-    }
-
-    // D-44 rule 4 (implicit): Session has FTDC but no logs → add logs to it
-    start_load(paths);
 }
 
 void App::start_load(const std::vector<std::string>& paths) {
@@ -767,16 +922,81 @@ void App::on_filter_changed() {
 }
 
 // ------------------------------------------------------------
-//  open_file_dialog — NFD multi-select (D-65, D-67, D-68, D-69, D-76, D-77)
+//  open_log_folder_dialog — "Open Logs..." folder picker (D-78)
+//  Picks a directory, scans 1 level for .log/.json files.
+//  If none found, shows error popup.
 // ------------------------------------------------------------
-void App::open_file_dialog() {
-    NFD::Guard nfd_guard;  // RAII: NFD_Init() / NFD_Quit()
+void App::open_log_folder_dialog() {
+    NFD::Guard nfd_guard;
 
-    // Parent to SDL window so dialog is modal (D-68)
     nfdwindowhandle_t parent_handle{};
     NFD_GetNativeWindowFromSDLWindow(window_, &parent_handle);
 
-    // No restrictive filter — FTDC files have no extension (D-69)
+    const nfdnchar_t* default_path = last_dialog_dir_.empty()
+                                     ? nullptr
+                                     : last_dialog_dir_.c_str();
+
+    NFD::UniquePathN out_path;
+    nfdresult_t result = NFD::PickFolder(out_path, default_path, parent_handle);
+
+    if (result == NFD_OKAY && out_path) {
+        std::string p(out_path.get());
+
+        // Deduplicate
+        bool already = false;
+        for (const auto& existing : pending_picks_) {
+            if (existing.path == p) { already = true; break; }
+        }
+        if (already) return;
+
+        // Scan for log files in the directory
+        int n = count_log_files_in_dir(p);
+        if (n == 0) {
+            // No log files found — show error popup
+            show_no_logs_error_ = true;
+            return;
+        }
+
+        PendingPick pick;
+        pick.path = p;
+        pick.is_ftdc = false;
+        pick.file_count = n;
+        std::string basename = path_basename(p);
+        if (n == 1) {
+            // Find the single file and use its name
+            auto files = collect_log_files_in_dir(p);
+            if (!files.empty())
+                pick.label = "LOG: " + path_basename(files[0]);
+            else
+                pick.label = "LOGS: 1 file";
+        } else {
+            pick.label = "LOGS: " + std::to_string(n) + " files";
+        }
+
+        pending_picks_.push_back(std::move(pick));
+
+        // Remember parent directory for next dialog
+        auto sep = p.rfind('/');
+#if defined(_WIN32)
+        auto sep2 = p.rfind('\\');
+        if (sep2 != std::string::npos && (sep == std::string::npos || sep2 > sep))
+            sep = sep2;
+#endif
+        if (sep != std::string::npos)
+            last_dialog_dir_ = p.substr(0, sep);
+    }
+}
+
+// ------------------------------------------------------------
+//  open_log_file_dialog — "or pick individual files..." (D-65)
+//  Multi-select file dialog for individual .log/.json files.
+// ------------------------------------------------------------
+void App::open_log_file_dialog() {
+    NFD::Guard nfd_guard;
+
+    nfdwindowhandle_t parent_handle{};
+    NFD_GetNativeWindowFromSDLWindow(window_, &parent_handle);
+
     const nfdnchar_t* default_path = last_dialog_dir_.empty()
                                      ? nullptr
                                      : last_dialog_dir_.c_str();
@@ -794,32 +1014,90 @@ void App::open_file_dialog() {
             NFD::PathSet::GetPath(out_paths, i, path);
             if (path) {
                 std::string p(path.get());
-                // Deduplicate: don't add if already in pending_picks_
+                // Deduplicate
                 bool already = false;
                 for (const auto& existing : pending_picks_) {
-                    if (existing == p) { already = true; break; }
+                    if (existing.path == p) { already = true; break; }
                 }
                 if (!already) {
-                    pending_picks_.push_back(std::move(p));
+                    pending_picks_.push_back(classify_pick(p));
                 }
             }
         }
 
-        // Remember directory of first selected file for next dialog (D-77)
+        // Remember directory of last selected file for next dialog
         if (!pending_picks_.empty()) {
-            const auto& last = pending_picks_.back();
-            auto sep = last.rfind('/');
+            const auto& last_path = pending_picks_.back().path;
+            auto sep = last_path.rfind('/');
 #if defined(_WIN32)
-            auto sep2 = last.rfind('\\');
+            auto sep2 = last_path.rfind('\\');
             if (sep2 != std::string::npos && (sep == std::string::npos || sep2 > sep))
                 sep = sep2;
 #endif
             if (sep != std::string::npos)
-                last_dialog_dir_ = last.substr(0, sep);
+                last_dialog_dir_ = last_path.substr(0, sep);
         }
     }
-    // NFD_CANCEL: user cancelled — do nothing (no crash, no empty state)
-    // NFD_ERROR: could not open dialog — silently ignore (rare)
+}
+
+// ------------------------------------------------------------
+//  open_ftdc_folder_dialog — "Open FTDC..." folder picker (D-78)
+//  Picks a diagnostic.data directory for FTDC data.
+// ------------------------------------------------------------
+void App::open_ftdc_folder_dialog() {
+    NFD::Guard nfd_guard;
+
+    nfdwindowhandle_t parent_handle{};
+    NFD_GetNativeWindowFromSDLWindow(window_, &parent_handle);
+
+    const nfdnchar_t* default_path = last_dialog_dir_.empty()
+                                     ? nullptr
+                                     : last_dialog_dir_.c_str();
+
+    NFD::UniquePathN out_path;
+    nfdresult_t result = NFD::PickFolder(out_path, default_path, parent_handle);
+
+    if (result == NFD_OKAY && out_path) {
+        std::string p(out_path.get());
+
+        // Deduplicate
+        bool already = false;
+        for (const auto& existing : pending_picks_) {
+            if (existing.path == p) { already = true; break; }
+        }
+        if (already) return;
+
+        PendingPick pick;
+        pick.path = p;
+        pick.is_ftdc = true;
+        pick.file_count = 1;
+        pick.label = "FTDC: " + path_basename(p);
+
+        // Enforce 1 FTDC per session — replace existing FTDC pick
+        Session& s = active_session();
+        bool session_has_ftdc = s.ftdc_view.load_state() != FtdcLoadState::Idle;
+        if (session_has_ftdc) {
+            // Session already has FTDC — don't allow another
+            return;
+        }
+        // Remove any existing FTDC pick from pending list (only 1 allowed)
+        pending_picks_.erase(
+            std::remove_if(pending_picks_.begin(), pending_picks_.end(),
+                           [](const PendingPick& pp) { return pp.is_ftdc; }),
+            pending_picks_.end());
+
+        pending_picks_.push_back(std::move(pick));
+
+        // Remember parent directory for next dialog
+        auto sep = p.rfind('/');
+#if defined(_WIN32)
+        auto sep2 = p.rfind('\\');
+        if (sep2 != std::string::npos && (sep == std::string::npos || sep2 > sep))
+            sep = sep2;
+#endif
+        if (sep != std::string::npos)
+            last_dialog_dir_ = p.substr(0, sep);
+    }
 }
 
 // ------------------------------------------------------------
@@ -828,8 +1106,11 @@ void App::open_file_dialog() {
 void App::render_menu_bar() {
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
-            if (ImGui::MenuItem("Open...", "Ctrl+O")) {
-                open_file_dialog();
+            if (ImGui::MenuItem("Open Logs...", "Ctrl+O")) {
+                open_log_folder_dialog();
+            }
+            if (ImGui::MenuItem("Open FTDC...", "Ctrl+D")) {
+                open_ftdc_folder_dialog();
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Quit", "Alt+F4")) running_ = false;
@@ -907,7 +1188,7 @@ void App::render_welcome_screen(float h) {
                     + line_h * 2               // spacer
                     + line_h                    // instructions
                     + line_h                    // supported types
-                    + line_h + (line_h + 10.0f) // "Open Files..." button + spacing
+                    + line_h + (line_h + 10.0f) // Open buttons row + spacing
                     + (pick_count > 0 ? line_h * 2 + line_h * pick_count : 0)  // chips + Load
                     + (recent_count > 0 ? line_h * 2 + line_h * recent_count : 0);
     float start_y = std::max(0.0f, (h - content_h) * 0.5f);
@@ -951,25 +1232,54 @@ void App::render_welcome_screen(float h) {
         ImGui::TextDisabled("%s", types);
     }
 
-    // ---- "Open Files..." button (D-70) ----
+    // ---- "Open Logs..." and "Open FTDC..." buttons + "or pick individual files..." link ----
     ImGui::Dummy(ImVec2(0, line_h));
     {
-        const char* btn_label = "Open Files...";
-        float btn_w = ImGui::CalcTextSize(btn_label).x + 32.0f;  // padding
+        const char* btn1_label = "Open Logs...";
+        const char* btn2_label = "Open FTDC...";
+        float btn1_w = ImGui::CalcTextSize(btn1_label).x + 32.0f;
+        float btn2_w = ImGui::CalcTextSize(btn2_label).x + 32.0f;
+        float btn_spacing = 12.0f;
+        float total_w = btn1_w + btn_spacing + btn2_w;
         float btn_h_val = line_h + 10.0f;
-        ImGui::SetCursorPosX((avail.x - btn_w) * 0.5f);
+        ImGui::SetCursorPosX((avail.x - total_w) * 0.5f);
 
         // Visible button style: slightly lighter than background, highlight on hover
         ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.12f, 0.12f, 0.12f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  ImVec4(0.25f, 0.25f, 0.25f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive,   ImVec4(0.35f, 0.35f, 0.35f, 1.0f));
-        if (ImGui::Button(btn_label, ImVec2(btn_w, btn_h_val))) {
-            open_file_dialog();
+        if (ImGui::Button(btn1_label, ImVec2(btn1_w, btn_h_val))) {
+            open_log_folder_dialog();
+        }
+        ImGui::SameLine(0, btn_spacing);
+        if (ImGui::Button(btn2_label, ImVec2(btn2_w, btn_h_val))) {
+            open_ftdc_folder_dialog();
         }
         ImGui::PopStyleColor(3);
     }
 
-    // ---- Tag chips for pending file picks (D-72, D-74, D-75) ----
+    // ---- "or pick individual files..." small text link ----
+    {
+        const char* link_label = "or pick individual files...";
+        float tw = ImGui::CalcTextSize(link_label).x;
+        ImGui::SetCursorPosX((avail.x - tw) * 0.5f);
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.50f, 0.50f, 0.50f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,   ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
+        if (ImGui::Button(link_label)) {
+            open_log_file_dialog();
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+        }
+        ImGui::PopStyleVar(2);
+        ImGui::PopStyleColor(4);
+    }
+
+    // ---- Tag chips for pending file picks (D-72, D-74, D-75, D-78) ----
     if (!pending_picks_.empty()) {
         ImGui::Dummy(ImVec2(0, line_h * 0.5f));
 
@@ -984,22 +1294,10 @@ void App::render_welcome_screen(float h) {
         int remove_idx = -1;
 
         for (int i = 0; i < static_cast<int>(pending_picks_.size()); ++i) {
-            const auto& full_path = pending_picks_[i];
+            const auto& pick = pending_picks_[i];
 
-            // Extract filename from path
-            std::string display_name = full_path;
-            auto slash_pos = full_path.rfind('/');
-            if (slash_pos != std::string::npos && slash_pos + 1 < full_path.size())
-                display_name = full_path.substr(slash_pos + 1);
-#if defined(_WIN32)
-            auto bslash_pos = full_path.rfind('\\');
-            if (bslash_pos != std::string::npos &&
-                (slash_pos == std::string::npos || bslash_pos > slash_pos))
-                display_name = full_path.substr(bslash_pos + 1);
-#endif
-
-            // Chip label: "filename  x"
-            std::string chip_text = display_name;
+            // D-78: Use smart label from PendingPick (FTDC:/LOG:/LOGS: prefix)
+            std::string chip_text = pick.label;
             float text_w = ImGui::CalcTextSize(chip_text.c_str()).x;
             float x_btn_w = ImGui::CalcTextSize(" x").x;
             float chip_w = text_w + x_btn_w + 20.0f;  // padding
@@ -1019,13 +1317,19 @@ void App::render_welcome_screen(float h) {
 
             ImGui::PushID(i + 1000);  // offset to avoid collision with recent files
 
-            // Dark rounded pill background with border (D-75)
-            ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.15f, 0.15f, 0.15f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  ImVec4(0.20f, 0.20f, 0.20f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   ImVec4(0.25f, 0.25f, 0.25f, 1.0f));
+            // D-78: FTDC chips get a subtle tint, log chips stay neutral
+            ImVec4 chip_bg      = pick.is_ftdc ? ImVec4(0.12f, 0.15f, 0.20f, 1.0f)
+                                               : ImVec4(0.15f, 0.15f, 0.15f, 1.0f);
+            ImVec4 chip_hover   = pick.is_ftdc ? ImVec4(0.18f, 0.22f, 0.28f, 1.0f)
+                                               : ImVec4(0.20f, 0.20f, 0.20f, 1.0f);
+            ImVec4 chip_active  = pick.is_ftdc ? ImVec4(0.22f, 0.28f, 0.35f, 1.0f)
+                                               : ImVec4(0.25f, 0.25f, 0.25f, 1.0f);
+            ImGui::PushStyleColor(ImGuiCol_Button,        chip_bg);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  chip_hover);
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   chip_active);
             ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12.0f);  // rounded pill
 
-            // Render as button with "filename  x" text
+            // Render as button with "label  x" text
             std::string btn_label = chip_text + "  x";
             if (ImGui::Button(btn_label.c_str(), ImVec2(chip_w, chip_h))) {
                 remove_idx = i;  // mark for removal
@@ -1036,7 +1340,7 @@ void App::render_welcome_screen(float h) {
 
             // Tooltip showing full path
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s", full_path.c_str());
+                ImGui::SetTooltip("%s", pick.path.c_str());
             }
 
             ImGui::PopID();
@@ -1048,7 +1352,7 @@ void App::render_welcome_screen(float h) {
             pending_picks_.erase(pending_picks_.begin() + remove_idx);
         }
 
-        // ---- "Load" button (D-73) ----
+        // ---- "Load" button (D-73, D-78) ----
         if (!pending_picks_.empty()) {
             ImGui::Dummy(ImVec2(0, line_h * 0.5f));
             {
@@ -1062,8 +1366,26 @@ void App::render_welcome_screen(float h) {
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  ImVec4(0.15f, 0.35f, 0.15f, 1.0f));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,   ImVec4(0.20f, 0.45f, 0.20f, 1.0f));
                 if (ImGui::Button(load_label, ImVec2(load_w, load_h))) {
-                    // D-73: Send all pending picks through handle_drop() smart routing
-                    handle_drop(pending_picks_);
+                    // D-73/D-78: Expand log directories to individual files,
+                    // then route through handle_drop() smart routing.
+                    std::vector<std::string> resolved_paths;
+                    for (const auto& pick : pending_picks_) {
+                        if (pick.is_ftdc) {
+                            // FTDC paths go through as-is (handle_drop routes them)
+                            resolved_paths.push_back(pick.path);
+                        } else if (path_is_directory(pick.path)) {
+                            // Log directory: expand to individual log files
+                            auto files = collect_log_files_in_dir(pick.path);
+                            for (auto& f : files)
+                                resolved_paths.push_back(std::move(f));
+                        } else {
+                            // Individual log file
+                            resolved_paths.push_back(pick.path);
+                        }
+                    }
+                    if (!resolved_paths.empty()) {
+                        handle_drop(resolved_paths);
+                    }
                     pending_picks_.clear();
                 }
                 ImGui::PopStyleColor(3);
@@ -1420,6 +1742,7 @@ void App::render_frame() {
     render_menu_bar();
 
     // Ctrl+O / Cmd+O keyboard shortcut for File > Open (D-71)
+    // Ctrl+D / Cmd+D keyboard shortcut for Open Directory (D-78)
     {
         ImGuiIO& io = ImGui::GetIO();
         bool ctrl = io.KeyCtrl;
@@ -1427,7 +1750,10 @@ void App::render_frame() {
         ctrl = io.KeySuper;  // Cmd on macOS
 #endif
         if (ctrl && ImGui::IsKeyPressed(ImGuiKey_O, false)) {
-            open_file_dialog();
+            open_log_folder_dialog();
+        }
+        if (ctrl && ImGui::IsKeyPressed(ImGuiKey_D, false)) {
+            open_ftdc_folder_dialog();
         }
     }
 
@@ -1512,6 +1838,35 @@ void App::render_frame() {
         ImGui::SameLine();
         if (ImGui::Button("Cancel", ImVec2(btn_w, 0))) {
             close_confirm_idx_ = -1;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    // ---- "No log files found" error popup ----
+    if (show_no_logs_error_) {
+        ImGui::OpenPopup("##no_logs_error");
+        show_no_logs_error_ = false;
+    }
+    if (ImGui::BeginPopupModal("##no_logs_error", nullptr,
+                                ImGuiWindowFlags_NoTitleBar |
+                                ImGuiWindowFlags_NoResize |
+                                ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.45f, 0.45f, 1.0f));
+        ImGui::Text("No log files found");
+        ImGui::PopStyleColor();
+        ImGui::Separator();
+        ImGui::Spacing();
+        ImGui::TextWrapped(
+            "No .log or .json files were found in the selected directory.\n\n"
+            "Please select a directory containing MongoDB log files,\n"
+            "or use \"or pick individual files...\" to select files directly.");
+        ImGui::Spacing();
+
+        float btn_w = 80.0f;
+        ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - btn_w) * 0.5f
+                             + ImGui::GetCursorPosX());
+        if (ImGui::Button("OK", ImVec2(btn_w, 0))) {
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
