@@ -166,6 +166,7 @@ jobs:
           update: true
           install: >-
             mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
             mingw-w64-x86_64-SDL2
             mingw-w64-x86_64-zlib
             mingw-w64-x86_64-gtk3
@@ -177,6 +178,11 @@ jobs:
           pacman -S --noconfirm mingw-w64-x86_64-python-pip
           pip install conan
           conan profile detect --force
+          # Ensure Conan uses MinGW generators for CMake-based dependencies
+          PROFILE_PATH=$(conan profile path default)
+          echo "" >> "$PROFILE_PATH"
+          echo "[conf]" >> "$PROFILE_PATH"
+          echo "tools.cmake.cmaketoolchain:generator=MinGW Makefiles" >> "$PROFILE_PATH"
 
       - name: Install Conan packages
         run: |
@@ -185,7 +191,9 @@ jobs:
             --output-folder=build/conan \
             --build=missing \
             -s build_type=Release \
-            -s compiler.cppstd=17
+            -s compiler.cppstd=17 \
+            -s os=Windows \
+            -s compiler=gcc
 
       - name: Build
         run: make all
