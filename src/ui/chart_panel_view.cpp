@@ -664,31 +664,32 @@ void ChartPanelView::render_chart(const MetricSeries& series,
             crosshair_x_  = ImPlot::GetPlotMousePos().x;
             hover_time_ms_ = plot_to_ms(crosshair_x_);
 
-            // Tooltip: show timestamp + value at hover time
+            // Tooltip: YYYY-MM-DD HH:MM:SS.mmm + value with unit (D-82)
             if (!dragging_) {
                 ImGui::BeginTooltip();
-                // Format timestamp from epoch ms
-                {
-                    int64_t t_ms = plot_to_ms(crosshair_x_);
-                    time_t  t_sec = static_cast<time_t>(t_ms / 1000);
-                    int     t_frac_ms = static_cast<int>(t_ms % 1000);
-                    struct tm tm_buf;
+                // Line 1: formatted timestamp with milliseconds
+                int64_t t_ms = plot_to_ms(crosshair_x_);
+                time_t  t_sec = static_cast<time_t>(t_ms / 1000);
+                int     t_frac_ms = static_cast<int>(t_ms % 1000);
+                struct tm tm_buf;
 #if defined(_WIN32)
-                    localtime_s(&tm_buf, &t_sec);
+                localtime_s(&tm_buf, &t_sec);
 #else
-                    localtime_r(&t_sec, &tm_buf);
+                localtime_r(&t_sec, &tm_buf);
 #endif
-                    char time_str[32];
-                    std::strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm_buf);
-                    ImGui::TextDisabled("%s.%03d", time_str, t_frac_ms);
-                }
+                char time_str[32];
+                std::strftime(time_str, sizeof(time_str),
+                              "%Y-%m-%d %H:%M:%S", &tm_buf);
+                ImGui::TextDisabled("%s.%03d", time_str, t_frac_ms);
+
+                // Line 2: value with unit
                 size_t hover_idx = FtdcAnalyzer::find_sample_at(ts,
                     plot_to_ms(crosshair_x_));
                 if (hover_idx < values.size()) {
                     char val_buf[64];
                     fmt_metric_value(val_buf, sizeof(val_buf),
                                      values[hover_idx], series.unit);
-                    ImGui::Text("%s: %s", series.display_name.c_str(), val_buf);
+                    ImGui::Text("%s", val_buf);
                 }
                 ImGui::EndTooltip();
             }
