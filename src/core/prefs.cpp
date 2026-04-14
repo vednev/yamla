@@ -87,6 +87,7 @@ Prefs PrefsManager::load() {
     parse_int("\"llm_maxtok\"",   p.llm_max_tokens);
     parse_str("\"export_dir\"",   p.export_dir);
     parse_int("\"chart_cols\"",  p.chart_layout_columns);
+    parse_str("\"last_dir\"",   p.last_open_directory);
 
     // Parse "recent_files":[...] array
     {
@@ -168,12 +169,14 @@ void PrefsManager::save(const Prefs& p) {
         "\"llm_key\":\"%s\",\"llm_endpoint\":\"%s\","
         "\"llm_model\":\"%s\",\"llm_maxtok\":%d,"
         "\"export_dir\":\"%s\",\"chart_cols\":%d,"
+        "\"last_dir\":\"%s\","
         "\"recent_files\":%s}\n",
         json_escape(p.font_name).c_str(), p.font_size, p.memory_limit_gb,
         p.prefer_checkboxes ? 1 : 0,
         json_escape(p.llm_api_key).c_str(), json_escape(p.llm_endpoint).c_str(),
         json_escape(p.llm_model).c_str(), p.llm_max_tokens,
         json_escape(p.export_dir).c_str(), p.chart_layout_columns,
+        json_escape(p.last_open_directory).c_str(),
         rf.c_str());
     std::fclose(f);
 

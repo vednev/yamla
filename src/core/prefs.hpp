@@ -22,6 +22,9 @@ struct Prefs {
     // Chart layout: 0=auto-detect, 1=list, 2/3/4=column count
     int         chart_layout_columns = 0;
 
+    // File picker: remember last browsed directory between sessions
+    std::string last_open_directory;
+
     // Recent files: full paths, most recent first, max 10 managed by App
     std::vector<std::string> recent_files;
 };
