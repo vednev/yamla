@@ -36,7 +36,7 @@ UNAME := $(shell uname)
 ifeq ($(UNAME), Darwin)
   # macOS — SDL2 Renderer → Metal (CAMetalLayer, no OpenGL required)
   PLATFORM_CFLAGS  :=
-  PLATFORM_LIBS    := -framework Metal -framework QuartzCore
+  PLATFORM_LIBS    := -framework Metal -framework QuartzCore -framework AppKit -framework UniformTypeIdentifiers
   BACKEND_SRCS     := $(IMGUI_BIND)/imgui_impl_sdl2.cpp \
                       $(IMGUI_BIND)/imgui_impl_sdlrenderer2.cpp
   BACKEND_OBJS     := build/obj/backends/imgui_impl_sdl2.o \
@@ -53,8 +53,10 @@ else ifeq ($(OS), Windows_NT)
 
 else
   # Linux — SDL2 + OpenGL 3.3 (unchanged)
-  PLATFORM_CFLAGS  :=
-  PLATFORM_LIBS    := -lGL
+  GTK3_CFLAGS      := $(shell pkg-config --cflags gtk+-3.0 2>/dev/null)
+  GTK3_LIBS        := $(shell pkg-config --libs   gtk+-3.0 2>/dev/null)
+  PLATFORM_CFLAGS  := $(GTK3_CFLAGS)
+  PLATFORM_LIBS    := -lGL $(GTK3_LIBS)
   BACKEND_SRCS     := $(IMGUI_BIND)/imgui_impl_sdl2.cpp \
                       $(IMGUI_BIND)/imgui_impl_opengl3.cpp
   BACKEND_OBJS     := build/obj/backends/imgui_impl_sdl2.o \
@@ -71,6 +73,7 @@ CXXFLAGS := -std=c++17 -O3 $(MARCH) -Wall -Wextra -Wno-unused-parameter \
             -I$(IMGUI_BIND) \
             -Ivendor/httplib \
             -Ivendor/md4c \
+            -Ivendor/nfd \
             $(PKG_CFLAGS) $(PLATFORM_CFLAGS)
 
 # C flags for md4c (compiled as C, not C++)
@@ -90,7 +93,16 @@ OBJS := $(patsubst $(SRCDIR)/%.cpp, $(BUILDDIR)/%.o, $(SRCS))
 VENDOR_C_SRCS := vendor/md4c/md4c.c
 VENDOR_C_OBJS := $(BUILDDIR)/vendor/md4c.o
 
-ALL_OBJS := $(OBJS) $(BACKEND_OBJS) $(VENDOR_C_OBJS)
+# Vendor NFD-extended (platform-conditional backend)
+ifeq ($(UNAME), Darwin)
+  VENDOR_NFD_SRCS := vendor/nfd/nfd_cocoa.m
+  VENDOR_NFD_OBJS := $(BUILDDIR)/vendor/nfd_cocoa.o
+else
+  VENDOR_NFD_SRCS := vendor/nfd/nfd_gtk.cpp
+  VENDOR_NFD_OBJS := $(BUILDDIR)/vendor/nfd_gtk.o
+endif
+
+ALL_OBJS := $(OBJS) $(BACKEND_OBJS) $(VENDOR_C_OBJS) $(VENDOR_NFD_OBJS)
 
 # ---- Targets -----------------------------------------------
 
@@ -124,6 +136,16 @@ $(BUILDDIR)/backends/%.o: $(IMGUI_BIND)/%.cpp
 $(BUILDDIR)/vendor/md4c.o: vendor/md4c/md4c.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
+
+# Rule for vendor NFD (macOS: Objective-C)
+$(BUILDDIR)/vendor/nfd_cocoa.o: vendor/nfd/nfd_cocoa.m
+	@mkdir -p $(dir $@)
+	$(CC) -O3 $(MARCH) -Ivendor/nfd $(SDL2_CFLAGS) -fno-objc-arc -c $< -o $@
+
+# Rule for vendor NFD (Linux: C++)
+$(BUILDDIR)/vendor/nfd_gtk.o: vendor/nfd/nfd_gtk.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
 	rm -rf $(BUILDDIR) $(TARGET)
