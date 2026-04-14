@@ -562,23 +562,23 @@ void ChartPanelView::render_chart(const MetricSeries& series,
         if (state.log_scale)
             ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Log10);
 
-        // Threshold highlight band
+        // Threshold gradient fill + line (D-83/D-84)
         if (has_threshold && !plot_x.empty()) {
-            // Find max Y in current view for the band top
-            double band_top = *std::max_element(plot_y.begin(), plot_y.end()) * 1.5;
-            if (band_top < thresh * 2.0) band_top = thresh * 2.0;
+            // Gradient fill from threshold up to chart top:
+            // transparent at threshold → semi-transparent red at top.
+            // Uses GetPlotDrawList for per-vertex color gradient.
+            ImDrawList* dl = ImPlot::GetPlotDrawList();
+            ImVec2 p_lo = ImPlot::PlotToPixels(plot_x.front(), thresh);
+            ImVec2 p_hi = ImPlot::PlotToPixels(plot_x.back(),  y_hi);
+            ImU32 col_bottom = IM_COL32(255, 60, 60, 0);   // transparent at threshold
+            ImU32 col_top    = IM_COL32(255, 60, 60, 50);  // semi-transparent red at top
+            dl->AddRectFilledMultiColor(
+                ImVec2(p_lo.x, p_hi.y),  // top-left (screen: smaller Y)
+                ImVec2(p_hi.x, p_lo.y),  // bottom-right (screen: larger Y)
+                col_top, col_top,         // top-left, top-right
+                col_bottom, col_bottom);  // bottom-left, bottom-right
 
-            // Draw shaded rect above threshold
-            std::vector<double> band_x = {plot_x.front(), plot_x.back()};
-            std::vector<double> band_lo = {thresh, thresh};
-            std::vector<double> band_hi = {band_top, band_top};
-
-            ImPlot::SetNextFillStyle(ImVec4(1.0f, 0.2f, 0.2f, 0.15f));
-            ImPlot::PlotShaded("##thresh",
-                               band_x.data(), band_lo.data(), band_hi.data(),
-                               static_cast<int>(band_x.size()));
-
-            // Threshold line
+            // Thin threshold line for precise reference
             ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.4f, 0.4f, 0.8f), 1.0f);
             ImPlot::PlotInfLines("##thresh_line", &thresh, 1,
                                  ImPlotInfLinesFlags_Horizontal);
