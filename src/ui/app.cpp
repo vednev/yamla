@@ -35,6 +35,9 @@
 #include "../core/prefs.hpp"
 #include "../core/system_ram.hpp"
 
+#include <nfd.hpp>
+#include <nfd_sdl2.h>
+
 // ---- Windows DX11 helpers ----------------------------------
 #if defined(_WIN32)
 static bool create_dx11_device(HWND hwnd,
@@ -764,12 +767,70 @@ void App::on_filter_changed() {
 }
 
 // ------------------------------------------------------------
+//  open_file_dialog — NFD multi-select (D-65, D-67, D-68, D-69, D-76, D-77)
+// ------------------------------------------------------------
+void App::open_file_dialog() {
+    NFD::Guard nfd_guard;  // RAII: NFD_Init() / NFD_Quit()
+
+    // Parent to SDL window so dialog is modal (D-68)
+    nfdwindowhandle_t parent_handle{};
+    NFD_GetNativeWindowFromSDLWindow(window_, &parent_handle);
+
+    // No restrictive filter — FTDC files have no extension (D-69)
+    const nfdnchar_t* default_path = last_dialog_dir_.empty()
+                                     ? nullptr
+                                     : last_dialog_dir_.c_str();
+
+    NFD::UniquePathSet out_paths;
+    nfdresult_t result = NFD::OpenDialogMultiple(out_paths, nullptr, 0,
+                                                  default_path, parent_handle);
+
+    if (result == NFD_OKAY) {
+        nfdpathsetsize_t count = 0;
+        NFD::PathSet::Count(out_paths, count);
+
+        for (nfdpathsetsize_t i = 0; i < count; ++i) {
+            NFD::UniquePathSetPathN path;
+            NFD::PathSet::GetPath(out_paths, i, path);
+            if (path) {
+                std::string p(path.get());
+                // Deduplicate: don't add if already in pending_picks_
+                bool already = false;
+                for (const auto& existing : pending_picks_) {
+                    if (existing == p) { already = true; break; }
+                }
+                if (!already) {
+                    pending_picks_.push_back(std::move(p));
+                }
+            }
+        }
+
+        // Remember directory of first selected file for next dialog (D-77)
+        if (!pending_picks_.empty()) {
+            const auto& last = pending_picks_.back();
+            auto sep = last.rfind('/');
+#if defined(_WIN32)
+            auto sep2 = last.rfind('\\');
+            if (sep2 != std::string::npos && (sep == std::string::npos || sep2 > sep))
+                sep = sep2;
+#endif
+            if (sep != std::string::npos)
+                last_dialog_dir_ = last.substr(0, sep);
+        }
+    }
+    // NFD_CANCEL: user cancelled — do nothing (no crash, no empty state)
+    // NFD_ERROR: could not open dialog — silently ignore (rare)
+}
+
+// ------------------------------------------------------------
 //  render_menu_bar
 // ------------------------------------------------------------
 void App::render_menu_bar() {
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
-            if (ImGui::MenuItem("Open Cluster (drag & drop files)")) {}
+            if (ImGui::MenuItem("Open...", "Ctrl+O")) {
+                open_file_dialog();
+            }
             ImGui::Separator();
             if (ImGui::MenuItem("Quit", "Alt+F4")) running_ = false;
             ImGui::EndMenu();
@@ -1234,6 +1295,18 @@ void App::render_frame() {
     }
 
     render_menu_bar();
+
+    // Ctrl+O / Cmd+O keyboard shortcut for File > Open (D-71)
+    {
+        ImGuiIO& io = ImGui::GetIO();
+        bool ctrl = io.KeyCtrl;
+#if defined(__APPLE__)
+        ctrl = io.KeySuper;  // Cmd on macOS
+#endif
+        if (ctrl && ImGui::IsKeyPressed(ImGuiKey_O, false)) {
+            open_file_dialog();
+        }
+    }
 
     // Sample mode popup — active session only (centered, dismissable, shown once per load)
     {

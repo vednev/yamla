@@ -179,6 +179,12 @@ private:
     bool  show_close_confirm_ = false;
     int   close_confirm_idx_  = -1;
 
+    // File picker state (D-65, D-72, D-73, D-74)
+    std::vector<std::string> pending_picks_;   // files selected but not yet loaded
+    std::string last_dialog_dir_;               // remember last directory (D-77)
+
+    void open_file_dialog();                    // opens NFD multi-select dialog
+
     void load_knowledge();          // reads knowledge/*.md into knowledge_text_
     void setup_llm();               // configure client after prefs load
 };
