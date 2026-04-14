@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-04-14T02:36:18.294Z"
+last_updated: "2026-04-14T02:42:54.517Z"
 last_activity: 2026-04-14
 progress:
   total_phases: 10
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 17
-  completed_plans: 12
-  percent: 71
+  completed_plans: 13
+  percent: 76
 ---
 
 # Project State
@@ -49,6 +49,7 @@ None — Phases 1-6 complete. Next: Phase 7 (Multi-Select File Picker) or Phase 
 - [Phase 05]: D-44: Smart drop routing with 4 rules — empty→fill, FTDC merge, logs→new tab, implicit fill
 - [Phase 06-01]: D-54/55: Welcome screen replaces 3-column layout for empty sessions; D-58/59/60: recent_files in prefs with dedup, LIFO, max 10
 - [Phase 07]: Use -fno-objc-arc for nfd_cocoa.m (NFD uses manual retain/release); vendor nfd_linux_shared.hpp as GTK backend dependency
+- [Phase 07]: D-72/D-73: Tag chips with horizontal flow layout and Load button routing through handle_drop()
 
 ## Pending
 
