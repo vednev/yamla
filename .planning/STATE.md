@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-04-14T02:42:54.517Z"
+last_updated: "2026-04-14T05:06:14.939Z"
 last_activity: 2026-04-14
 progress:
-  total_phases: 10
+  total_phases: 11
   completed_phases: 5
   total_plans: 17
-  completed_plans: 13
-  percent: 76
+  completed_plans: 14
+  percent: 82
 ---
 
 # Project State
@@ -28,10 +28,11 @@ progress:
 - [x] Phase 4: FTDC Chart Layout Modes (list/grid toggle, 2/3/4 columns, code reviewed)
 - [x] Phase 5: Multi-Session Tabs (Session struct, tab bar, smart drop routing, per-session LLM)
 - [x] Phase 6: Empty State Welcome Screen (welcome screen, recent files, 182 tests)
+- [x] Phase 8: FTDC Metrics Display Refinement (area fill, gradient thresholds, color-coded stats, name abbreviation)
 
 ## Current Phase
 
-None — Phases 1-6 complete. Next: Phase 7 (Multi-Select File Picker) or Phase 8 (FTDC Metrics Polish).
+None — Phases 1-8 complete (7 done separately).
 
 ## Decisions
 
@@ -50,6 +51,7 @@ None — Phases 1-6 complete. Next: Phase 7 (Multi-Select File Picker) or Phase 
 - [Phase 06-01]: D-54/55: Welcome screen replaces 3-column layout for empty sessions; D-58/59/60: recent_files in prefs with dedup, LIFO, max 10
 - [Phase 07]: Use -fno-objc-arc for nfd_cocoa.m (NFD uses manual retain/release); vendor nfd_linux_shared.hpp as GTK backend dependency
 - [Phase 07]: D-72/D-73: Tag chips with horizontal flow layout and Load button routing through handle_drop()
+- [Phase 08]: D-80/D-81: 2.0px line width + 15% opacity area fill; D-83/D-84: gradient threshold fill via AddRectFilledMultiColor; D-85/D-86: green/yellow/red stats coloring; D-87/D-88: abbreviated 30+ display names
 
 ## Pending
 
@@ -57,4 +59,4 @@ None.
 
 ---
 
-*State updated: 2026-04-13 (06-01 complete)*
+*State updated: 2026-04-14 (08-01 complete)*
