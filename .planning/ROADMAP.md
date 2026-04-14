@@ -90,8 +90,11 @@ Plans:
 
 **Depends on:** Phase 6 (welcome screen provides the "Open File" button entry point)
 
+**Plans:** 2 plans
+
 Plans:
-- [ ] TBD
+- [ ] 07-01-PLAN.md — Vendor NFD-extended + build system integration (Makefile + CI)
+- [ ] 07-02-PLAN.md — Dialog integration + tag chips UI + File > Open menu item
 
 ### Phase 8: Refine FTDC Metrics Graphs and Display
 
