@@ -152,7 +152,11 @@ void App::wire_session(Session& s) {
         uint32_t len    = e.raw_len;
         s.cluster->get_node_raw(idx, node_idx, offset, len);
 
-        const std::string& path = nodes[node_idx].path;
+        // Use file_idx (immutable, set at parse time) to find the
+        // correct source file — node_idx may have been remapped by merge.
+        const auto& fps = s.cluster->file_paths();
+        const std::string& path = (e.file_idx < fps.size())
+            ? fps[e.file_idx] : nodes[node_idx].path;
         s.detail_view.set_entry(&e, path, &s.cluster->strings(),
                                 offset, len);
         s.llm_client.tools().set_selected_entry(&e, path);

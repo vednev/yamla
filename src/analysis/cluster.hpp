@@ -49,9 +49,11 @@ inline NodeColor node_color(uint16_t node_idx) {
 struct NodeInfo {
     std::string  path;
     std::string  hostname;
+    uint16_t     port = 0;          // from "Process Details" attr.host
     NodeColor    color;
     uint16_t     idx = 0;
     bool         is_primary = false;
+    std::vector<std::string> merged_paths; // files merged into this node
 };
 
 // ------------------------------------------------------------
@@ -103,6 +105,9 @@ public:
     const AnalysisResult&        analysis() const { return analysis_; }
     const std::vector<NodeInfo>& nodes()    const { return nodes_; }
 
+    // All file paths in parse order (indexed by file_idx on LogEntry)
+    const std::vector<std::string>& file_paths() const { return file_paths_; }
+
     // Files that produced zero parsed entries (not valid log format)
     const std::vector<std::string>& failed_files() const { return failed_files_; }
 
@@ -113,13 +118,28 @@ public:
     bool get_node_raw(size_t entry_idx, uint16_t node_idx,
                       uint64_t& out_offset, uint32_t& out_len) const;
 
+    // Identity extracted from a log file's early lines.
+    struct FileIdentity {
+        std::string hostname;
+        uint16_t    port = 0;
+    };
+
     // Infer hostname from first lines; fall back to filename stem.
     static std::string infer_hostname(const MmapFile& file,
                                       const std::string& path);
 
+    // Infer hostname AND port from "Process Details" or "host" field.
+    static FileIdentity infer_identity(const MmapFile& file,
+                                       const std::string& path);
+
 private:
     void sort_entries_by_time();
     void dedup_entries();
+
+    // After all files are parsed, merge files that came from the
+    // same mongod instance (same hostname:port) into one logical node.
+    // Re-stamps node_idx/node_mask on every LogEntry.
+    void merge_nodes();
 
     // Two arena chains: one for strings (small, many), one for entries (large)
     ArenaChain string_chain_;

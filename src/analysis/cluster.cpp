@@ -108,6 +108,262 @@ std::string Cluster::infer_hostname(const MmapFile& file,
 }
 
 // ------------------------------------------------------------
+//  infer_identity — hostname + port from log preamble
+// ------------------------------------------------------------
+Cluster::FileIdentity Cluster::infer_identity(const MmapFile& file,
+                                               const std::string& path) {
+    FileIdentity id;
+
+    if (file.size() > 0) {
+        size_t scan_len = std::min<size_t>(file.size(), 65536);
+        const char* p   = file.data();
+        const char* end = p + scan_len;
+
+        simdjson::dom::parser parser;
+        std::string fallback_host;
+
+        while (p < end) {
+            const char* nl = static_cast<const char*>(
+                std::memchr(p, '\n', static_cast<size_t>(end - p)));
+            size_t line_len = nl ? static_cast<size_t>(nl - p)
+                                 : static_cast<size_t>(end - p);
+
+            if (line_len > 0 && p[0] == '{') {
+                simdjson::padded_string ps(p, line_len);
+                simdjson::dom::element doc;
+                if (parser.parse(ps).get(doc) == simdjson::SUCCESS) {
+                    // Priority 1: "Process Details" — attr.host has FQDN:port
+                    std::string_view msg;
+                    if (doc["msg"].get_string().get(msg) == simdjson::SUCCESS &&
+                        msg == "Process Details")
+                    {
+                        simdjson::dom::element attr;
+                        std::string_view host;
+                        if (doc["attr"].get(attr) == simdjson::SUCCESS &&
+                            attr["host"].get_string().get(host) == simdjson::SUCCESS &&
+                            !host.empty())
+                        {
+                            std::string h(host);
+                            size_t colon = h.rfind(':');
+                            if (colon != std::string::npos) {
+                                bool all_digits = true;
+                                for (size_t ci = colon + 1; ci < h.size(); ++ci) {
+                                    if (h[ci] < '0' || h[ci] > '9') {
+                                        all_digits = false;
+                                        break;
+                                    }
+                                }
+                                if (all_digits && colon + 1 < h.size()) {
+                                    id.port = static_cast<uint16_t>(
+                                        std::stoul(h.substr(colon + 1)));
+                                    h = h.substr(0, colon);
+                                }
+                            }
+                            // Also try attr.port if present
+                            if (id.port == 0) {
+                                int64_t p_val = 0;
+                                if (attr["port"].get_int64().get(p_val) == simdjson::SUCCESS
+                                    && p_val > 0 && p_val <= 65535)
+                                    id.port = static_cast<uint16_t>(p_val);
+                            }
+                            id.hostname = h;
+                            return id;
+                        }
+                    }
+
+                    // Priority 2: top-level "host" field
+                    if (fallback_host.empty()) {
+                        std::string_view host;
+                        if (doc["host"].get_string().get(host) == simdjson::SUCCESS
+                            && !host.empty()
+                            && host != "mongod"
+                            && host != "mongos"
+                            && host != "mongo")
+                        {
+                            fallback_host = std::string(host);
+                        }
+                    }
+                }
+            }
+            if (!nl) break;
+            p = nl + 1;
+        }
+
+        if (!fallback_host.empty()) {
+            id.hostname = fallback_host;
+            return id;
+        }
+    }
+
+    // Derive from filename stem
+    std::string stem = path;
+    size_t slash = stem.rfind('/');
+    if (slash != std::string::npos) stem = stem.substr(slash + 1);
+    size_t dot = stem.rfind('.');
+    if (dot != std::string::npos) stem = stem.substr(0, dot);
+    id.hostname = stem.empty() ? path : stem;
+    return id;
+}
+
+// ------------------------------------------------------------
+//  strip_rotation_suffix
+//
+//  "mongod.log.2024-01-15T00-00-00" → "mongod.log"
+//  "mongod.log"                      → "mongod.log"
+// ------------------------------------------------------------
+static std::string strip_rotation_suffix(const std::string& filename) {
+    // MongoDB rotation suffixes are dates like ".2024-01-15T00-00-00"
+    // Pattern: .YYYY-MM-DDThh-mm-ss (20 chars after the dot)
+    size_t dot = filename.rfind('.');
+    if (dot == std::string::npos || dot + 1 >= filename.size())
+        return filename;
+
+    // Check if the suffix after the last dot looks like a rotation date
+    std::string_view suffix(filename.data() + dot + 1, filename.size() - dot - 1);
+    if (suffix.size() >= 19 && suffix[4] == '-' && suffix[7] == '-' &&
+        suffix[10] == 'T')
+        return filename.substr(0, dot);
+
+    return filename;
+}
+
+// Extract (directory, base_filename) for grouping files by name
+static std::pair<std::string, std::string> file_group_key(const std::string& path) {
+    std::string dir, file;
+    size_t slash = path.rfind('/');
+#if defined(_WIN32)
+    size_t bslash = path.rfind('\\');
+    if (bslash != std::string::npos &&
+        (slash == std::string::npos || bslash > slash))
+        slash = bslash;
+#endif
+    if (slash != std::string::npos) {
+        dir  = path.substr(0, slash);
+        file = path.substr(slash + 1);
+    } else {
+        file = path;
+    }
+    return {dir, strip_rotation_suffix(file)};
+}
+
+// ------------------------------------------------------------
+//  merge_nodes — group files by (hostname, port) identity
+// ------------------------------------------------------------
+void Cluster::merge_nodes() {
+    if (nodes_.size() <= 1) return;
+
+    // Phase 1: group file indices by identity key
+    struct Group {
+        std::string             key;
+        std::string             hostname;
+        uint16_t                port = 0;
+        std::vector<uint16_t>   file_indices;  // original node indices
+    };
+
+    std::vector<Group> groups;
+    std::unordered_map<std::string, size_t> key_to_group;
+
+    bool all_have_hostname = true;
+
+    for (uint16_t i = 0; i < static_cast<uint16_t>(nodes_.size()); ++i) {
+        const auto& n = nodes_[i];
+
+        // Check if the hostname was derived from Process Details or host field
+        // (not from filename stem). Heuristic: if port != 0 or hostname
+        // contains a dot, it's a real hostname.
+        bool has_real_hostname = (n.port != 0) ||
+                                (n.hostname.find('.') != std::string::npos);
+
+        std::string key;
+        if (has_real_hostname) {
+            // Group by (hostname, port)
+            key = n.hostname + ":" + std::to_string(n.port);
+        } else {
+            all_have_hostname = false;
+            // Fallback: group by (directory, base_filename)
+            auto [dir, base] = file_group_key(n.path);
+            key = dir + "/" + base;
+        }
+
+        auto it = key_to_group.find(key);
+        if (it != key_to_group.end()) {
+            groups[it->second].file_indices.push_back(i);
+        } else {
+            Group g;
+            g.key      = key;
+            g.hostname = n.hostname;
+            g.port     = n.port;
+            g.file_indices.push_back(i);
+            key_to_group[key] = groups.size();
+            groups.push_back(std::move(g));
+        }
+    }
+
+    // If no merging would happen, bail out early
+    if (groups.size() == nodes_.size()) return;
+
+    // Phase 2: build old→new index mapping
+    std::vector<uint16_t> old_to_new(nodes_.size(), 0);
+    for (uint16_t gi = 0; gi < static_cast<uint16_t>(groups.size()); ++gi) {
+        for (uint16_t fi : groups[gi].file_indices)
+            old_to_new[fi] = gi;
+    }
+
+    // Phase 3: re-stamp every LogEntry
+    for (size_t i = 0; i < entries_->size(); ++i) {
+        LogEntry& e = (*entries_)[i];
+        uint16_t old_idx = e.node_idx;
+        uint16_t new_idx = old_to_new[old_idx];
+        e.node_idx = new_idx;
+
+        // Rebuild node_mask from scratch — collect all old node bits,
+        // map each to its new index, set new bits
+        uint32_t old_mask = e.node_mask;
+        uint32_t new_mask = 0;
+        for (uint16_t b = 0; b < 32 && b < nodes_.size(); ++b) {
+            if (old_mask & (1u << b))
+                new_mask |= (1u << old_to_new[b]);
+        }
+        e.node_mask = new_mask;
+    }
+
+    // Phase 4: re-stamp DedupAlt entries
+    for (auto& [idx, alts] : dedup_alts_) {
+        for (auto& alt : alts)
+            alt.node_idx = old_to_new[alt.node_idx];
+    }
+
+    // Phase 5: rebuild nodes_ vector — one entry per logical node
+    std::vector<NodeInfo> merged_nodes;
+    merged_nodes.reserve(groups.size());
+
+    for (uint16_t gi = 0; gi < static_cast<uint16_t>(groups.size()); ++gi) {
+        const auto& g = groups[gi];
+        NodeInfo ni;
+        ni.idx      = gi;
+        ni.hostname = g.hostname;
+        ni.port     = g.port;
+        ni.color    = node_color(gi);
+
+        // Use first file's path as the canonical path; track all merged paths
+        ni.path = nodes_[g.file_indices[0]].path;
+        for (uint16_t fi : g.file_indices)
+            ni.merged_paths.push_back(nodes_[fi].path);
+
+        merged_nodes.push_back(std::move(ni));
+    }
+
+    nodes_ = std::move(merged_nodes);
+
+    // Phase 6: rebuild file_paths_ to match new nodes
+    // (Each node may now represent multiple files)
+    // Keep file_paths_ as a flat list of all files for reference
+    // (no change needed — it's already the full list)
+
+    (void)all_have_hostname; // may be used for ambiguity dialog in the future
+}
+
+// ------------------------------------------------------------
 //  sort_entries_by_time — chunk-aware merge sort
 // ------------------------------------------------------------
 void Cluster::sort_entries_by_time() {
@@ -202,7 +458,9 @@ void Cluster::load() {
             {
                 size_t entries_before = entries_->size();
                 MmapFile file(file_paths_[i]);
-                nodes_[i].hostname = infer_hostname(file, file_paths_[i]);
+                auto ident = infer_identity(file, file_paths_[i]);
+                nodes_[i].hostname = ident.hostname;
+                nodes_[i].port     = ident.port;
 
                 float base = static_cast<float>(i) * file_weight;
                 parser.parse_file(file, i, *entries_,
@@ -236,6 +494,7 @@ void Cluster::load() {
         sort_entries_by_time();
         scratch_chain_.reset();  // free merge-sort scratch memory
         dedup_entries();
+        merge_nodes();
 
         analysis_ = Analyzer::analyze(*entries_, *strings_);
 
@@ -307,7 +566,9 @@ void Cluster::append_files(const std::vector<std::string>& new_paths) {
             {
                 size_t entries_before = entries_->size();
                 MmapFile file(new_paths[i]);
-                nodes_[ni].hostname = infer_hostname(file, new_paths[i]);
+                auto ident = infer_identity(file, new_paths[i]);
+                nodes_[ni].hostname = ident.hostname;
+                nodes_[ni].port     = ident.port;
 
                 float base = static_cast<float>(i) * file_weight;
                 parser.parse_file(file, ni, *entries_,
@@ -338,6 +599,7 @@ void Cluster::append_files(const std::vector<std::string>& new_paths) {
         sort_entries_by_time();
         scratch_chain_.reset();  // free merge-sort scratch memory
         dedup_entries();
+        merge_nodes();
 
         analysis_ = Analyzer::analyze(*entries_, *strings_);
 

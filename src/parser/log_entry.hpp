@@ -169,8 +169,12 @@ struct LogEntry {
     uint32_t conn_id       = 0;   // connection number (0 = none)
 
     // Node + severity in compact form
-    uint16_t node_idx      = 0;   // which cluster node
+    uint16_t node_idx      = 0;   // which cluster node (may be remapped by merge)
     Severity severity      = Severity::Unknown;
+
+    // Original file index — set at parse time, never remapped by merge.
+    // Used to find the correct file path for raw data retrieval.
+    uint16_t file_idx      = 0;
 
     // Bitmask of node indices that share this deduplicated entry
     // Supports up to 32 nodes per cluster.

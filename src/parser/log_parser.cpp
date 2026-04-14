@@ -230,6 +230,7 @@ ParseResult LogParser::parse_batch(const ParseBatch& batch) {
         SVS      sv{};
 
         e.node_idx   = batch.node_idx;
+        e.file_idx   = batch.node_idx;  // immutable; node_idx may be remapped later
         e.node_mask  = (batch.node_idx < 32) ? (1u << batch.node_idx) : 0u;
         e.raw_offset = static_cast<uint64_t>(batch.file_base + it.current_index());
 
