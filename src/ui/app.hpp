@@ -29,6 +29,7 @@ struct ID3D11RenderTargetView;
 #include "prefs_view.hpp"
 #include "chat_view.hpp"
 #include "ftdc_view.hpp"
+#include "file_picker.hpp"
 
 // ------------------------------------------------------------
 //  Session — one independent analysis session
@@ -80,6 +81,17 @@ struct Session {
     ~Session();
     Session(const Session&)            = delete;
     Session& operator=(const Session&) = delete;
+};
+
+// ------------------------------------------------------------
+//  PendingPick — a file or directory selected via the file picker
+//               but not yet loaded into a session
+// ------------------------------------------------------------
+struct PendingPick {
+    std::string path;        // absolute filesystem path
+    std::string label;       // display label (e.g. "FTDC: diagnostic.data", "LOG: mongod.log")
+    bool        is_ftdc;     // true if this is an FTDC directory/file
+    int         file_count;  // for log directories: number of .log/.json files found
 };
 
 // ------------------------------------------------------------
@@ -179,11 +191,8 @@ private:
     bool  show_close_confirm_ = false;
     int   close_confirm_idx_  = -1;
 
-    // File picker state (D-65, D-72, D-73, D-74)
-    std::vector<std::string> pending_picks_;   // files selected but not yet loaded
-    std::string last_dialog_dir_;               // remember last directory (D-77)
-
-    void open_file_dialog();                    // opens NFD multi-select dialog
+    // Custom ImGui file picker (replaces native NFD dialogs)
+    FilePicker file_picker_;
 
     void load_knowledge();          // reads knowledge/*.md into knowledge_text_
     void setup_llm();               // configure client after prefs load
