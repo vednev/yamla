@@ -584,12 +584,22 @@ void ChartPanelView::render_chart(const MetricSeries& series,
                                  ImPlotInfLinesFlags_Horizontal);
         }
 
-        // Main data line
+        // Main data line — thicker for visibility (D-80)
         if (!plot_x.empty()) {
-            ImPlot::SetNextLineStyle(IMPLOT_AUTO_COL, 1.5f);
+            ImPlot::SetNextLineStyle(IMPLOT_AUTO_COL, 2.0f);
             ImPlot::PlotLine(series.display_name.c_str(),
                              plot_x.data(), plot_y.data(),
                              static_cast<int>(plot_x.size()));
+
+            // Area fill below the line at ~15% opacity (D-81, Grafana-style)
+            ImVec4 line_color = ImPlot::GetLastItemColor();
+            line_color.w = 0.15f;
+            ImPlot::SetNextFillStyle(line_color);
+            double shade_ref = y_lo;  // shade down to Y-axis bottom
+            ImPlot::PlotShaded(series.display_name.c_str(),
+                               plot_x.data(), plot_y.data(),
+                               static_cast<int>(plot_x.size()),
+                               shade_ref);
         }
 
         // Log event annotation markers
