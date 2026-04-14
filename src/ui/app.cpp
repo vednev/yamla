@@ -901,11 +901,14 @@ void App::render_welcome_screen(float h) {
     float line_h = ImGui::GetTextLineHeightWithSpacing();
     float title_scale = 1.5f;
     int recent_count = static_cast<int>(prefs_.recent_files.size());
+    int pick_count = static_cast<int>(pending_picks_.size());
     float content_h = (line_h * title_scale)  // "YAMLA"
                     + line_h                    // tagline
                     + line_h * 2               // spacer
                     + line_h                    // instructions
                     + line_h                    // supported types
+                    + line_h + (line_h + 10.0f) // "Open Files..." button + spacing
+                    + (pick_count > 0 ? line_h * 2 + line_h * pick_count : 0)  // chips + Load
                     + (recent_count > 0 ? line_h * 2 + line_h * recent_count : 0);
     float start_y = std::max(0.0f, (h - content_h) * 0.5f);
 
@@ -947,6 +950,126 @@ void App::render_welcome_screen(float h) {
         ImGui::SetCursorPosX((avail.x - tw) * 0.5f);
         ImGui::TextDisabled("%s", types);
     }
+
+    // ---- "Open Files..." button (D-70) ----
+    ImGui::Dummy(ImVec2(0, line_h));
+    {
+        const char* btn_label = "Open Files...";
+        float btn_w = ImGui::CalcTextSize(btn_label).x + 32.0f;  // padding
+        float btn_h_val = line_h + 10.0f;
+        ImGui::SetCursorPosX((avail.x - btn_w) * 0.5f);
+
+        // Visible button style: slightly lighter than background, highlight on hover
+        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.12f, 0.12f, 0.12f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  ImVec4(0.25f, 0.25f, 0.25f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,   ImVec4(0.35f, 0.35f, 0.35f, 1.0f));
+        if (ImGui::Button(btn_label, ImVec2(btn_w, btn_h_val))) {
+            open_file_dialog();
+        }
+        ImGui::PopStyleColor(3);
+    }
+
+    // ---- Tag chips for pending file picks (D-72, D-74, D-75) ----
+    if (!pending_picks_.empty()) {
+        ImGui::Dummy(ImVec2(0, line_h * 0.5f));
+
+        // Center the chip region — use a fixed max width
+        float chip_region_w = std::min(avail.x * 0.7f, 600.0f);
+        float chip_start_x = (avail.x - chip_region_w) * 0.5f;
+        ImGui::SetCursorPosX(chip_start_x);
+
+        // Horizontal flow: track x position, wrap on overflow
+        float cursor_x = chip_start_x;
+        float spacing = 6.0f;
+        int remove_idx = -1;
+
+        for (int i = 0; i < static_cast<int>(pending_picks_.size()); ++i) {
+            const auto& full_path = pending_picks_[i];
+
+            // Extract filename from path
+            std::string display_name = full_path;
+            auto slash_pos = full_path.rfind('/');
+            if (slash_pos != std::string::npos && slash_pos + 1 < full_path.size())
+                display_name = full_path.substr(slash_pos + 1);
+#if defined(_WIN32)
+            auto bslash_pos = full_path.rfind('\\');
+            if (bslash_pos != std::string::npos &&
+                (slash_pos == std::string::npos || bslash_pos > slash_pos))
+                display_name = full_path.substr(bslash_pos + 1);
+#endif
+
+            // Chip label: "filename  x"
+            std::string chip_text = display_name;
+            float text_w = ImGui::CalcTextSize(chip_text.c_str()).x;
+            float x_btn_w = ImGui::CalcTextSize(" x").x;
+            float chip_w = text_w + x_btn_w + 20.0f;  // padding
+            float chip_h = line_h + 4.0f;
+
+            // Wrap to next line if chip exceeds region width
+            if (i > 0 && cursor_x + chip_w > chip_start_x + chip_region_w) {
+                cursor_x = chip_start_x;
+            }
+
+            if (i > 0 && cursor_x > chip_start_x) {
+                ImGui::SameLine(0, spacing);
+            }
+            if (cursor_x == chip_start_x && i > 0) {
+                ImGui::SetCursorPosX(chip_start_x);
+            }
+
+            ImGui::PushID(i + 1000);  // offset to avoid collision with recent files
+
+            // Dark rounded pill background with border (D-75)
+            ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.15f, 0.15f, 0.15f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  ImVec4(0.20f, 0.20f, 0.20f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,   ImVec4(0.25f, 0.25f, 0.25f, 1.0f));
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12.0f);  // rounded pill
+
+            // Render as button with "filename  x" text
+            std::string btn_label = chip_text + "  x";
+            if (ImGui::Button(btn_label.c_str(), ImVec2(chip_w, chip_h))) {
+                remove_idx = i;  // mark for removal
+            }
+
+            ImGui::PopStyleVar();
+            ImGui::PopStyleColor(3);
+
+            // Tooltip showing full path
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", full_path.c_str());
+            }
+
+            ImGui::PopID();
+            cursor_x += chip_w + spacing;
+        }
+
+        // Remove deselected chip (D-72 "x" button)
+        if (remove_idx >= 0) {
+            pending_picks_.erase(pending_picks_.begin() + remove_idx);
+        }
+
+        // ---- "Load" button (D-73) ----
+        if (!pending_picks_.empty()) {
+            ImGui::Dummy(ImVec2(0, line_h * 0.5f));
+            {
+                const char* load_label = "Load";
+                float load_w = ImGui::CalcTextSize(load_label).x + 40.0f;
+                float load_h = line_h + 10.0f;
+                ImGui::SetCursorPosX((avail.x - load_w) * 0.5f);
+
+                // Green-tinted button to distinguish from "Open Files..."
+                ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.10f, 0.25f, 0.10f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered,  ImVec4(0.15f, 0.35f, 0.15f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,   ImVec4(0.20f, 0.45f, 0.20f, 1.0f));
+                if (ImGui::Button(load_label, ImVec2(load_w, load_h))) {
+                    // D-73: Send all pending picks through handle_drop() smart routing
+                    handle_drop(pending_picks_);
+                    pending_picks_.clear();
+                }
+                ImGui::PopStyleColor(3);
+            }
+        }
+    }  // end if (!pending_picks_.empty())
 
     // ---- Recent files section (D-56 item 7, D-57, D-61) ----
     if (!prefs_.recent_files.empty()) {
