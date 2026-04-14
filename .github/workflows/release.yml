@@ -178,22 +178,9 @@ jobs:
           pacman -S --noconfirm mingw-w64-x86_64-python-pip
           pip install conan
           conan profile detect --force
-          # Fix the detected profile for MinGW: set compiler, version, and CMake generator
           PROFILE_PATH=$(conan profile path default)
           GCC_VER=$(gcc -dumpversion | cut -d. -f1)
-          # Overwrite the profile with correct MinGW settings
-          cat > "$PROFILE_PATH" <<EOF
-[settings]
-arch=x86_64
-build_type=Release
-compiler=gcc
-compiler.cppstd=17
-compiler.libcxx=libstdc++11
-compiler.version=${GCC_VER}
-os=Windows
-[conf]
-tools.cmake.cmaketoolchain:generator=MinGW Makefiles
-EOF
+          printf '[settings]\narch=x86_64\nbuild_type=Release\ncompiler=gcc\ncompiler.cppstd=17\ncompiler.libcxx=libstdc++11\ncompiler.version=%s\nos=Windows\n[conf]\ntools.cmake.cmaketoolchain:generator=MinGW Makefiles\n' "$GCC_VER" > "$PROFILE_PATH"
 
       - name: Install Conan packages
         run: |
