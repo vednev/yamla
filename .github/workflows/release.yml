@@ -190,7 +190,7 @@ jobs:
             --build=missing
 
       - name: Build
-        run: make all
+        run: CXX=g++ make all
 
       - name: Package
         shell: pwsh

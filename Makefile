@@ -3,7 +3,7 @@
 #  Targets: all, deps, clean, run
 # ============================================================
 
-CXX      := clang++
+CXX      ?= clang++
 CONAN_PC := build/conan
 
 # Locate Conan-installed imgui bindings (backends compiled from source)
