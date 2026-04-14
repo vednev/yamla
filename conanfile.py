@@ -3,7 +3,7 @@ from conan import ConanFile
 
 class YamlaConan(ConanFile):
     name = "yamla"
-    version = "0.0.1"
+    version = "0.1.3"
     settings = "os", "compiler", "build_type", "arch"
     generators = "PkgConfigDeps", "VirtualRunEnv"
 
