@@ -112,11 +112,14 @@ public:
     const std::vector<std::string>& failed_files() const { return failed_files_; }
 
     // For stacked (deduped) entries: get the raw file position for a
-    // specific node. Returns true if found; fills out_offset/out_len.
+    // specific node. Returns true if found; fills out_offset/out_len
+    // and out_file_idx.
     // If node_idx matches the entry's own node_idx, simply returns
-    // the entry's raw_offset/raw_len. Otherwise checks the dedup alts.
+    // the entry's raw_offset/raw_len/file_idx. Otherwise checks the
+    // dedup alts.
     bool get_node_raw(size_t entry_idx, uint16_t node_idx,
-                      uint64_t& out_offset, uint32_t& out_len) const;
+                      uint64_t& out_offset, uint32_t& out_len,
+                      uint16_t& out_file_idx) const;
 
     // Identity extracted from a log file's early lines.
     struct FileIdentity {
@@ -161,6 +164,7 @@ private:
     // it's still in the LogEntry itself.
     struct DedupAlt {
         uint16_t node_idx;
+        uint16_t file_idx;
         uint64_t raw_offset;
         uint32_t raw_len;
     };

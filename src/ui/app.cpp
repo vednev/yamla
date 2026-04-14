@@ -148,15 +148,17 @@ void App::wire_session(Session& s) {
         const auto& nodes = s.cluster->nodes();
         if (node_idx >= nodes.size()) return;
 
-        uint64_t offset = e.raw_offset;
-        uint32_t len    = e.raw_len;
-        s.cluster->get_node_raw(idx, node_idx, offset, len);
+        uint64_t offset   = e.raw_offset;
+        uint32_t len      = e.raw_len;
+        uint16_t file_idx = e.file_idx;
+        s.cluster->get_node_raw(idx, node_idx, offset, len, file_idx);
 
-        // Use file_idx (immutable, set at parse time) to find the
-        // correct source file — node_idx may have been remapped by merge.
+        // Use the file_idx returned by get_node_raw() — for stacked entries
+        // where the user clicked a different node badge, this will be the
+        // alt entry's file_idx (not the surviving entry's).
         const auto& fps = s.cluster->file_paths();
-        const std::string& path = (e.file_idx < fps.size())
-            ? fps[e.file_idx] : nodes[node_idx].path;
+        const std::string& path = (file_idx < fps.size())
+            ? fps[file_idx] : nodes[node_idx].path;
         s.detail_view.set_entry(&e, path, &s.cluster->strings(),
                                 offset, len);
         s.llm_client.tools().set_selected_entry(&e, path);

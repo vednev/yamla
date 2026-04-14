@@ -408,7 +408,7 @@ void Cluster::dedup_entries() {
                 ei.node_mask |= ej.node_mask;
                 // Save the merged entry's raw position so we can
                 // show any node's version of this stacked entry.
-                alts[keep_idx].push_back({ej.node_idx, ej.raw_offset, ej.raw_len});
+                alts[keep_idx].push_back({ej.node_idx, ej.file_idx, ej.raw_offset, ej.raw_len});
                 merged[j] = true;
             }
         }
@@ -616,15 +616,17 @@ void Cluster::append_files(const std::vector<std::string>& new_paths) {
 //  get_node_raw — look up raw file position for a specific node
 // ------------------------------------------------------------
 bool Cluster::get_node_raw(size_t entry_idx, uint16_t node_idx,
-                            uint64_t& out_offset, uint32_t& out_len) const
+                            uint64_t& out_offset, uint32_t& out_len,
+                            uint16_t& out_file_idx) const
 {
     if (entry_idx >= entries_->size()) return false;
     const LogEntry& e = (*entries_)[entry_idx];
 
     // If the entry's own node matches, use its raw position directly
     if (e.node_idx == node_idx) {
-        out_offset = e.raw_offset;
-        out_len    = e.raw_len;
+        out_offset   = e.raw_offset;
+        out_len      = e.raw_len;
+        out_file_idx = e.file_idx;
         return true;
     }
 
@@ -634,8 +636,9 @@ bool Cluster::get_node_raw(size_t entry_idx, uint16_t node_idx,
 
     for (const auto& alt : it->second) {
         if (alt.node_idx == node_idx) {
-            out_offset = alt.raw_offset;
-            out_len    = alt.raw_len;
+            out_offset   = alt.raw_offset;
+            out_len      = alt.raw_len;
+            out_file_idx = alt.file_idx;
             return true;
         }
     }

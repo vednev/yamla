@@ -137,12 +137,17 @@ TEST_CASE("Cluster: DedupAlt preservation", "[cluster]") {
     // get_node_raw for both nodes should succeed
     uint64_t off0 = 0, off1 = 0;
     uint32_t len0 = 0, len1 = 0;
-    REQUIRE(c.get_node_raw(stacked_idx, 0, off0, len0));
-    REQUIRE(c.get_node_raw(stacked_idx, 1, off1, len1));
+    uint16_t fidx0 = 0, fidx1 = 0;
+    REQUIRE(c.get_node_raw(stacked_idx, 0, off0, len0, fidx0));
+    REQUIRE(c.get_node_raw(stacked_idx, 1, off1, len1, fidx1));
 
     // Both should have valid offset/len
     REQUIRE(len0 > 0);
     REQUIRE(len1 > 0);
+
+    // file_idx must correctly identify each node's source file
+    REQUIRE(fidx0 == 0);
+    REQUIRE(fidx1 == 1);
 
     cleanup_temp(path_a);
     cleanup_temp(path_b);
