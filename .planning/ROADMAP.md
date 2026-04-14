@@ -84,13 +84,11 @@ Plans:
 Plans:
 - [x] 06-01-PLAN.md — Welcome screen rendering + recent files tracking + prefs serialization
 
-### Phase 7: Multi-Select File Picker with Deselect Tags
+### Phase 7: Multi-Select File Picker with Deselect Tags — COMPLETE
 
-**Goal:** Add a multi-select file picker that lets users pick multiple files across different directories using a native or custom file dialog. Selected files appear as tag/chip boxes on screen, each with a small "x" button to deselect. This replaces the current drag-and-drop-only model with an explicit file picker alternative that gives users fine-grained control over which files to load.
+**Goal:** Native file dialog via NFD-extended with tag chip preview before loading. Open Files button on welcome screen + File > Open menu + Ctrl+O shortcut.
 
-**Depends on:** Phase 6 (welcome screen provides the "Open File" button entry point)
-
-**Plans:** 2 plans
+**Result:** NFD-extended vendored (Cocoa on macOS, GTK3 on Linux), tag chips on welcome screen with deselect "x", Load button, SDL2 window parenting. 182 tests passing.
 
 Plans:
 - [x] 07-01-PLAN.md — Vendor NFD-extended + build system integration (Makefile + CI)
@@ -125,7 +123,25 @@ Plans:
 Plans:
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
+### Phase 999.7: Session Save/Restore with Recent Sessions (BACKLOG)
+
+**Goal:** Allow saving session state (loaded files, filter selections, scroll positions, dashboard toggles, chat history) and restoring them later. The welcome screen shows "Recent Sessions" instead of (or alongside) "Recent Files" — each session entry remembers what files were loaded and the full UI state, so the user can pick up exactly where they left off.
+
+**Key Ideas:**
+- Serialize session state to a JSON or binary file (e.g., `~/.config/yamla/sessions/`)
+- Each saved session captures: file paths, filter state, scroll position, active dashboards, chart layout mode, chat conversation history
+- Welcome screen shows "Recent Sessions" with descriptive titles (e.g., "mongod.log + diagnostic.data — 2 hours ago")
+- Clicking a recent session restores the full state (loads files + applies saved filters/positions)
+- Auto-save session state on close (or periodically)
+- Consider: explicit "Save Session As..." for named sessions
+
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
 ---
 
 *Roadmap created: 2026-04-12*
-*Updated: 2026-04-13 — Phases 4, 5, 6 marked complete. 182 tests, 116,282 assertions.*
+*Updated: 2026-04-13 — Phase 7 complete, added backlog 999.7 (session save/restore)*
