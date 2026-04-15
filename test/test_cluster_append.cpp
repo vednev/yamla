@@ -90,6 +90,7 @@ TEST_CASE("Cluster append: cross-file dedup", "[cluster][append]") {
     auto path_b = write_temp_log(unique_b + shared);
 
     Cluster c;
+    c.set_dedup_enabled(true);
     c.add_file(path_a);
     c.load();
 

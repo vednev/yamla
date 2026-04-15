@@ -87,6 +87,7 @@ TEST_CASE("Cluster: multi-file dedup", "[cluster]") {
     auto path_b = write_temp_log(shared + unique_b);
 
     Cluster c;
+    c.set_dedup_enabled(true);
     c.add_file(path_a);
     c.add_file(path_b);
     c.load();
@@ -118,6 +119,7 @@ TEST_CASE("Cluster: DedupAlt preservation", "[cluster]") {
     auto path_b = write_temp_log(shared + unique_b);
 
     Cluster c;
+    c.set_dedup_enabled(true);
     c.add_file(path_a);
     c.add_file(path_b);
     c.load();
