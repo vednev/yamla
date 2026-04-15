@@ -1,5 +1,6 @@
 #include "ftdc_parser.hpp"
 #include "metric_defs.hpp"
+#include "../core/thread_pool.hpp"
 
 #include <cstdio>
 #include <cstring>
@@ -7,6 +8,14 @@
 #include <cassert>
 #include <algorithm>
 #include <limits>
+#include <thread>
+#include <unistd.h>  // sysconf
+
+#if defined(__APPLE__)
+#  include <mach/mach.h>
+#else
+#  include <sys/sysinfo.h>
+#endif
 
 #include <zlib.h>
 
@@ -475,6 +484,45 @@ static bool decode_data_chunk(const uint8_t* data, size_t data_len,
 }
 
 // ============================================================
+//  available_memory_bytes — platform physical memory query
+//  Returns an estimate of available physical RAM.
+//  Falls back to SIZE_MAX (single-thread) if the query fails.
+// ============================================================
+static size_t available_memory_bytes() {
+#if defined(__APPLE__)
+    // macOS: use Mach VM statistics
+    mach_port_t host = mach_host_self();
+    vm_size_t page_size_v = 0;
+    host_page_size(host, &page_size_v);
+    vm_statistics64_data_t vm_stat;
+    mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
+    if (host_statistics64(host, HOST_VM_INFO64,
+                          reinterpret_cast<host_info64_t>(&vm_stat),
+                          &count) != KERN_SUCCESS) {
+        return SIZE_MAX;
+    }
+    uint64_t free_pages = vm_stat.free_count + vm_stat.inactive_count;
+    return static_cast<size_t>(free_pages) * static_cast<size_t>(page_size_v);
+#else
+    // Linux/POSIX: use _SC_AVPHYS_PAGES
+    long pages     = sysconf(_SC_AVPHYS_PAGES);
+    long page_size = sysconf(_SC_PAGE_SIZE);
+    if (pages <= 0 || page_size <= 0) return SIZE_MAX;
+    return static_cast<size_t>(pages) * static_cast<size_t>(page_size);
+#endif
+}
+
+// ============================================================
+//  ChunkInfo — index entry for two-pass parallel decode
+// ============================================================
+struct ChunkInfo {
+    size_t  file_offset;    // byte offset of this chunk in the file
+    size_t  doc_size;       // total BSON document size (including 4-byte header)
+    uint8_t chunk_type;     // 0 = metadata, 1 = data, 255 = unknown
+    int     schema_version; // which metadata chunk's schema applies
+};
+
+// ============================================================
 //  parse_file — top-level entry point
 // ============================================================
 bool FtdcParser::parse_file(const std::string& path,
@@ -493,6 +541,11 @@ bool FtdcParser::parse_file(const std::string& path,
     size_t file_size = static_cast<size_t>(std::ftell(fp));
     std::fseek(fp, 0, SEEK_SET);
 
+    // Determine whether to use the parallel decode path.
+    // Parallel decode only activates for files larger than half of available
+    // physical memory (T-10-08: prevents memory amplification on small systems).
+    bool use_parallel = (file_size > available_memory_bytes() / 2);
+
     // Schema from the last type-0 (metadata) chunk
     std::vector<std::string> schema_paths;
     std::vector<int64_t>     ref_values;
@@ -507,6 +560,359 @@ bool FtdcParser::parse_file(const std::string& path,
     std::vector<uint8_t> local_doc_buf;
     std::swap(local_doc_buf, doc_buf_);
     local_doc_buf.reserve(64 * 1024); // typical FTDC chunk size
+
+    // ----------------------------------------------------------------
+    //  PARALLEL PATH: two-pass decode for very large files
+    // ----------------------------------------------------------------
+    if (use_parallel) {
+        // Pass 1: Sequential scan to build a chunk index.
+        // Never decode across schema boundaries in parallel (Pitfall 4).
+        std::vector<ChunkInfo> chunks;
+        int schema_ver = -1; // -1 = no metadata seen yet
+
+        size_t scan_pos = 0;
+        while (scan_pos + 4 <= file_size) {
+            uint8_t sz_buf[4];
+            if (std::fread(sz_buf, 1, 4, fp) != 4) break;
+            int32_t doc_size = read_i32(sz_buf);
+            if (doc_size < 5 || doc_size > 128 * 1024 * 1024) break;
+
+            ChunkInfo ci;
+            ci.file_offset   = scan_pos;
+            ci.doc_size      = static_cast<size_t>(doc_size);
+            ci.schema_version = schema_ver;
+            ci.chunk_type    = 255;
+
+            // Peek at the chunk type field: read the chunk to inspect type byte.
+            local_doc_buf.resize(static_cast<size_t>(doc_size));
+            std::memcpy(local_doc_buf.data(), sz_buf, 4);
+            size_t rem = static_cast<size_t>(doc_size) - 4;
+            if (std::fread(local_doc_buf.data() + 4, 1, rem, fp) != rem) break;
+
+            // Quick scan for "type" field in the outer BSON doc
+            const uint8_t* p2  = local_doc_buf.data() + 4;
+            const uint8_t* end2 = local_doc_buf.data() + doc_size;
+            while (p2 < end2) {
+                uint8_t ft = *p2++;
+                if (ft == 0) break;
+                const uint8_t* ks = p2;
+                while (p2 < end2 && *p2) ++p2;
+                if (p2 >= end2) break;
+                std::string fk(reinterpret_cast<const char*>(ks), p2 - ks);
+                ++p2;
+                if (fk == "type" && ft == bson_type::INT32 && p2 + 4 <= end2) {
+                    ci.chunk_type = static_cast<uint8_t>(read_i32(p2));
+                    break;
+                }
+                // Skip value
+                ptrdiff_t fs = bson_value_fixed_size(ft);
+                if (fs >= 0) { p2 += fs; }
+                else if (ft == bson_type::UTF8) {
+                    if (p2 + 4 > end2) break;
+                    int32_t sl = read_i32(p2);
+                    if (sl < 0 || p2 + 4 + sl > end2) break;
+                    p2 += 4 + sl;
+                } else if (ft == bson_type::BINARY) {
+                    if (p2 + 5 > end2) break;
+                    int32_t bl = read_i32(p2);
+                    if (bl < 0 || p2 + 4 + 1 + bl > end2) break;
+                    p2 += 4 + 1 + bl;
+                } else if (ft == bson_type::DOCUMENT || ft == bson_type::ARRAY) {
+                    if (p2 + 4 > end2) break;
+                    int32_t dl2 = read_i32(p2);
+                    if (dl2 < 5 || p2 + dl2 > end2) break;
+                    p2 += dl2;
+                } else { break; }
+            }
+
+            if (ci.chunk_type == 0) {
+                ++schema_ver;
+                ci.schema_version = schema_ver;
+            } else {
+                ci.schema_version = schema_ver;
+            }
+
+            chunks.push_back(ci);
+            scan_pos += static_cast<size_t>(doc_size);
+
+            if (progress_cb_)
+                progress_cb_(scan_pos / 2, file_size); // phase 1 = first half of progress
+        }
+
+        // Group data chunks by schema_version.
+        // For each schema group: decode metadata first (sequential),
+        // then dispatch data chunks to ThreadPool workers.
+        //
+        // Find distinct schema versions
+        int max_schema = schema_ver;
+        if (max_schema < 0) {
+            // No metadata found — fall through to sequential path
+            use_parallel = false;
+        }
+
+        if (use_parallel) {
+        // Per-schema metadata: parsed schema_paths and ref_values
+        struct SchemaData {
+            std::vector<std::string> paths;
+            std::vector<int64_t>     refs;
+            int64_t                  start_ms = 0;
+        };
+        std::vector<SchemaData> schemas(static_cast<size_t>(max_schema + 1));
+
+        // Decode each metadata chunk sequentially to extract schema
+        for (const auto& ci : chunks) {
+            if (ci.chunk_type != 0) continue;
+            int sv = ci.schema_version;
+            if (sv < 0 || sv > max_schema) continue;
+
+            // Re-read this chunk from file
+            std::fseek(fp, static_cast<long>(ci.file_offset), SEEK_SET);
+            local_doc_buf.resize(ci.doc_size);
+            if (std::fread(local_doc_buf.data(), 1, ci.doc_size, fp) != ci.doc_size) continue;
+
+            // Full parse of this metadata chunk to extract schema
+            const uint8_t* p3   = local_doc_buf.data() + 4;
+            const uint8_t* end3 = local_doc_buf.data() + ci.doc_size;
+            const uint8_t* doc_ptr = nullptr;
+            int32_t        doc_sz  = 0;
+            int64_t        start_v = 0;
+
+            while (p3 < end3) {
+                uint8_t ft = *p3++;
+                if (ft == 0) break;
+                const uint8_t* ks = p3;
+                while (p3 < end3 && *p3) ++p3;
+                if (p3 >= end3) break;
+                std::string fk(reinterpret_cast<const char*>(ks), p3 - ks);
+                ++p3;
+
+                if (fk == "doc" && ft == bson_type::DOCUMENT && p3 + 4 <= end3) {
+                    doc_ptr = p3;
+                    doc_sz  = read_i32(p3);
+                    if (doc_sz < 5 || p3 + doc_sz > end3) { doc_ptr = nullptr; }
+                    else p3 += doc_sz;
+                } else if ((fk == "_id" || fk == "start") && ft == bson_type::DATE && p3 + 8 <= end3) {
+                    if (start_v == 0) start_v = read_i64(p3);
+                    p3 += 8;
+                } else {
+                    ptrdiff_t fs = bson_value_fixed_size(ft);
+                    if (fs >= 0) { if (p3 + fs > end3) break; p3 += fs; }
+                    else if (ft == bson_type::UTF8) {
+                        if (p3 + 4 > end3) break;
+                        int32_t sl = read_i32(p3);
+                        if (sl < 0 || p3 + 4 + sl > end3) break;
+                        p3 += 4 + sl;
+                    } else if (ft == bson_type::BINARY) {
+                        if (p3 + 5 > end3) break;
+                        int32_t bl = read_i32(p3);
+                        if (bl < 0 || p3 + 4 + 1 + bl > end3) break;
+                        p3 += 4 + 1 + bl;
+                    } else if (ft == bson_type::DOCUMENT || ft == bson_type::ARRAY) {
+                        if (p3 + 4 > end3) break;
+                        int32_t dl2 = read_i32(p3);
+                        if (dl2 < 5 || p3 + dl2 > end3) break;
+                        p3 += dl2;
+                    } else break;
+                }
+            }
+
+            if (doc_ptr && doc_sz >= 5) {
+                std::vector<MetricLeaf> leaves;
+                extract_metrics(doc_ptr, static_cast<size_t>(doc_sz), "", leaves);
+                SchemaData& sd = schemas[static_cast<size_t>(sv)];
+                sd.paths.reserve(leaves.size());
+                sd.refs.reserve(leaves.size());
+                for (auto& lf : leaves) {
+                    sd.paths.push_back(std::move(lf.path));
+                    sd.refs.push_back(lf.value);
+                }
+                sd.start_ms = start_v;
+            }
+        }
+
+        // Pass 2: Dispatch data chunks to ThreadPool workers by schema version.
+        // Each worker decodes a contiguous range of data chunks with the same schema.
+        {
+            // Collect data chunks grouped by schema version
+            struct DataGroup {
+                int                      schema_ver;
+                std::vector<ChunkInfo>   chunks;
+            };
+
+            std::vector<DataGroup> groups;
+            for (const auto& ci : chunks) {
+                if (ci.chunk_type != 1) continue;
+                int sv = ci.schema_version;
+                if (sv < 0 || sv > max_schema) continue;
+                if (groups.empty() || groups.back().schema_ver != sv) {
+                    groups.push_back({sv, {}});
+                }
+                groups.back().chunks.push_back(ci);
+            }
+
+            size_t nthreads = std::min<size_t>(
+                std::thread::hardware_concurrency(),
+                groups.size());
+            if (nthreads == 0) nthreads = 1;
+
+            // Per-group MetricStores (one per group, decoded by pool workers)
+            std::vector<MetricStore> group_stores(groups.size());
+
+            {
+                ThreadPool pool(nthreads);
+                for (size_t gi = 0; gi < groups.size(); ++gi) {
+                    pool.submit([gi, &groups, &schemas, &group_stores, &path]() {
+                        const DataGroup& grp = groups[gi];
+                        int sv = grp.schema_ver;
+                        if (sv < 0 || sv >= static_cast<int>(schemas.size())) return;
+                        const SchemaData& sd = schemas[static_cast<size_t>(sv)];
+                        MetricStore& ms = group_stores[gi];
+
+                        // Open file independently per worker thread
+                        FILE* wfp = std::fopen(path.c_str(), "rb");
+                        if (!wfp) return;
+
+                        std::vector<uint8_t> wbuf;
+                        wbuf.reserve(64 * 1024);
+
+                        for (const auto& ci : grp.chunks) {
+                            std::fseek(wfp, static_cast<long>(ci.file_offset), SEEK_SET);
+                            wbuf.resize(ci.doc_size);
+                            if (std::fread(wbuf.data(), 1, ci.doc_size, wfp) != ci.doc_size) continue;
+
+                            // Parse the outer BSON to get "data" binary field
+                            const uint8_t* wp  = wbuf.data() + 4;
+                            const uint8_t* we  = wbuf.data() + ci.doc_size;
+                            const uint8_t* data_ptr  = nullptr;
+                            int32_t        data_size  = 0;
+                            int64_t        start_val  = 0;
+
+                            while (wp < we) {
+                                uint8_t ft = *wp++;
+                                if (ft == 0) break;
+                                const uint8_t* ks = wp;
+                                while (wp < we && *wp) ++wp;
+                                if (wp >= we) break;
+                                std::string fk(reinterpret_cast<const char*>(ks), wp - ks);
+                                ++wp;
+                                if (fk == "data" && ft == bson_type::BINARY && wp + 5 <= we) {
+                                    int32_t bl = read_i32(wp); wp += 4;
+                                    wp += 1; // subtype
+                                    if (bl >= 0 && wp + bl <= we) {
+                                        data_ptr = wp;
+                                        data_size = bl;
+                                        wp += bl;
+                                    }
+                                } else if ((fk == "_id" || fk == "start") && ft == bson_type::DATE && wp + 8 <= we) {
+                                    if (start_val == 0) start_val = read_i64(wp);
+                                    wp += 8;
+                                } else {
+                                    ptrdiff_t fs = bson_value_fixed_size(ft);
+                                    if (fs >= 0) { if (wp + fs > we) break; wp += fs; }
+                                    else if (ft == bson_type::UTF8) {
+                                        if (wp + 4 > we) break;
+                                        int32_t sl = read_i32(wp);
+                                        if (sl < 0 || wp + 4 + sl > we) break;
+                                        wp += 4 + sl;
+                                    } else if (ft == bson_type::BINARY) {
+                                        if (wp + 5 > we) break;
+                                        int32_t bl2 = read_i32(wp);
+                                        if (bl2 < 0 || wp + 4 + 1 + bl2 > we) break;
+                                        wp += 4 + 1 + bl2;
+                                    } else if (ft == bson_type::DOCUMENT || ft == bson_type::ARRAY) {
+                                        if (wp + 4 > we) break;
+                                        int32_t dl2 = read_i32(wp);
+                                        if (dl2 < 5 || wp + dl2 > we) break;
+                                        wp += dl2;
+                                    } else break;
+                                }
+                            }
+
+                            if (!data_ptr || data_size < 5) continue;
+
+                            // Decompress
+                            std::vector<uint8_t> decompressed;
+                            std::string zerr;
+                            const uint8_t* zlib_data = data_ptr + 4;
+                            int32_t zlib_len = data_size - 4;
+                            if (zlib_len <= 0) continue;
+                            if (!zlib_decompress(zlib_data, static_cast<size_t>(zlib_len), decompressed, zerr)) continue;
+
+                            const uint8_t* dp = decompressed.data();
+                            size_t         dl = decompressed.size();
+                            if (dl < 13) continue;
+
+                            // Extract per-chunk schema from embedded reference doc
+                            int32_t ref_doc_size = read_i32(dp);
+                            if (ref_doc_size < 5 || static_cast<size_t>(ref_doc_size) > dl) continue;
+
+                            std::vector<MetricLeaf> leaves;
+                            if (!extract_metrics(dp, static_cast<size_t>(ref_doc_size), "", leaves)) continue;
+
+                            std::vector<std::string> chunk_paths;
+                            std::vector<int64_t>     chunk_refs;
+                            chunk_paths.reserve(leaves.size());
+                            chunk_refs.reserve(leaves.size());
+                            for (auto& lf : leaves) {
+                                chunk_paths.push_back(std::move(lf.path));
+                                chunk_refs.push_back(lf.value);
+                            }
+
+                            dp += ref_doc_size;
+                            dl -= static_cast<size_t>(ref_doc_size);
+                            if (dl < 8) continue;
+
+                            int32_t n_metrics_chunk = read_i32(dp); dp += 4; dl -= 4;
+                            int32_t n_deltas        = read_i32(dp); dp += 4; dl -= 4;
+                            if (n_metrics_chunk <= 0 || n_deltas <= 0) continue;
+
+                            int64_t ts_start = start_val;
+                            if (ts_start == 0) ts_start = sd.start_ms;
+
+                            decode_data_chunk(dp, dl,
+                                              n_metrics_chunk, n_deltas,
+                                              chunk_paths, chunk_refs,
+                                              ts_start, ms);
+                        }
+                        std::fclose(wfp);
+                    });
+                }
+                pool.wait_all();
+                pool.stop();
+            }
+
+            // Merge per-group MetricStores into the final store (in order)
+            for (size_t gi = 0; gi < group_stores.size(); ++gi) {
+                MetricStore& src = group_stores[gi];
+                for (const auto& key : src.ordered_keys) {
+                    auto it = src.series.find(key);
+                    if (it == src.series.end()) continue;
+                    MetricSeries& src_series = it->second;
+                    MetricSeries& dst_series = store.get_or_create(key);
+                    if (dst_series.display_name.empty()) {
+                        dst_series.display_name  = src_series.display_name;
+                        dst_series.unit          = src_series.unit;
+                        dst_series.is_cumulative = src_series.is_cumulative;
+                    }
+                    dst_series.timestamps_ms.insert(
+                        dst_series.timestamps_ms.end(),
+                        src_series.timestamps_ms.begin(),
+                        src_series.timestamps_ms.end());
+                    dst_series.values.insert(
+                        dst_series.values.end(),
+                        src_series.values.begin(),
+                        src_series.values.end());
+                }
+            }
+        }
+
+        // Swap local buffer back to member
+        std::swap(local_doc_buf, doc_buf_);
+        std::fclose(fp);
+        store.update_time_range();
+        return ok;
+        } // end if (use_parallel) — inner block
+    } // end outer parallel branch: if (use_parallel) after index scan
 
     while (bytes_read + 4 <= file_size) {
         // Read BSON document size
