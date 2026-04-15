@@ -80,6 +80,14 @@ public:
         int64_t                     t_start_ms,
         int64_t                     t_end_ms);
 
+    // Overload with reusable scratch buffer (D-05) — avoids per-call heap allocation for sort
+    static WindowStats compute_window_stats(
+        const std::vector<int64_t>& timestamps_ms,
+        const std::vector<double>&  values,
+        int64_t                     t_start_ms,
+        int64_t                     t_end_ms,
+        std::vector<double>&        sorted_vals_scratch);
+
     // ----------------------------------------------------------
     //  find_sample_at
     //

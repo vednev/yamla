@@ -9,6 +9,8 @@
 #include <cstdint>
 #include <cmath>
 
+#include "../ftdc/ftdc_analyzer.hpp"
+
 // Forward declarations
 struct MetricStore;
 struct MetricSeries;
@@ -32,14 +34,40 @@ struct UnitDisplayConfig {
 UnitDisplayConfig unit_display_config(const std::string& unit);
 
 // ------------------------------------------------------------
+//  LttbCache — cached LTTB downsampled plot data (D-04)
+// ------------------------------------------------------------
+struct LttbCache {
+    std::vector<double> plot_x;
+    std::vector<double> plot_y;
+    double cached_x_min = 0.0;
+    double cached_x_max = 0.0;
+    bool   valid        = false;
+};
+
+// ------------------------------------------------------------
+//  StatsCache — cached window statistics (D-05)
+// ------------------------------------------------------------
+struct StatsCache {
+    WindowStats ws;
+    int64_t     cached_t0_ms = 0;
+    int64_t     cached_t1_ms = 0;
+    bool        valid        = false;
+};
+
+// ------------------------------------------------------------
 //  ChartState — per-metric chart render configuration.
 //  show_rate and log_scale are auto-computed from data, not
 //  user-toggled.  Cumulative metrics always show rate.
 // ------------------------------------------------------------
 struct ChartState {
-    bool show_rate  = true;   // always true for cumulative metrics
-    bool log_scale  = false;  // auto-computed from value range + unit
-    bool initialized = false; // set once after first data scan
+    bool show_rate   = true;   // always true for cumulative metrics
+    bool log_scale   = false;  // auto-computed from value range + unit
+    bool initialized = false;  // set once after first data scan
+    // D-04: LTTB downsample cache
+    LttbCache lttb;
+    // D-05: window stats cache + reusable scratch buffer for p99
+    StatsCache stats;
+    std::vector<double> sorted_vals_scratch;
 };
 
 // ------------------------------------------------------------
@@ -99,9 +127,9 @@ private:
     void render_minimap(float width, float height);
     void render_chart(const MetricSeries& series, ChartState& state,
                       float width, float chart_h);
-    void render_stats_row(const MetricSeries& series, bool use_rate,
-                          int64_t t0_ms, int64_t t1_ms);
-    void render_annotation_markers(double x_min, double x_max);
+    void render_stats_row(const MetricSeries& series, ChartState& state,
+                          bool use_rate, int64_t t0_ms, int64_t t1_ms);
+    void render_annotation_markers();
 
     // Format a double value as a human-readable string with unit
     static void fmt_metric_value(char* buf, size_t bufsz,
@@ -147,6 +175,10 @@ private:
     float  drag_end_px_x_  = 0.0f;  // screen-space pixel X where drag ended
 
     int layout_columns_ = 0;  // 0=auto, 1=list, 2/3/4=grid columns
+
+    // D-07: Pre-filtered annotation X positions — rebuilt once per frame at render_inner() start
+    std::vector<double> frame_err_xs_;
+    std::vector<double> frame_warn_xs_;
 
     // Guidemark state (Phase 9)
     struct GuideMark {

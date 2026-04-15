@@ -116,13 +116,27 @@ std::vector<size_t> FtdcAnalyzer::lttb_downsample(
 }
 
 // ============================================================
-//  compute_window_stats
+//  compute_window_stats (4-arg — delegates to 5-arg with scratch)
 // ============================================================
 WindowStats FtdcAnalyzer::compute_window_stats(
     const std::vector<int64_t>& timestamps_ms,
     const std::vector<double>&  values,
     int64_t                     t_start_ms,
     int64_t                     t_end_ms)
+{
+    std::vector<double> scratch;
+    return compute_window_stats(timestamps_ms, values, t_start_ms, t_end_ms, scratch);
+}
+
+// ============================================================
+//  compute_window_stats (5-arg — reusable scratch buffer, D-05)
+// ============================================================
+WindowStats FtdcAnalyzer::compute_window_stats(
+    const std::vector<int64_t>& timestamps_ms,
+    const std::vector<double>&  values,
+    int64_t                     t_start_ms,
+    int64_t                     t_end_ms,
+    std::vector<double>&        scratch)
 {
     WindowStats ws;
     if (timestamps_ms.empty() || values.empty()) return ws;
@@ -141,23 +155,23 @@ WindowStats FtdcAnalyzer::compute_window_stats(
     ws.max   = values[i_start];
     double sum = 0.0;
 
-    std::vector<double> sorted_vals;
-    sorted_vals.reserve(ws.count);
+    scratch.clear();
+    scratch.reserve(ws.count);
 
     for (size_t i = i_start; i < i_end; ++i) {
         double v = values[i];
         if (v < ws.min) ws.min = v;
         if (v > ws.max) ws.max = v;
         sum += v;
-        sorted_vals.push_back(v);
+        scratch.push_back(v);
     }
 
     ws.avg = sum / static_cast<double>(ws.count);
 
     // p99
-    std::sort(sorted_vals.begin(), sorted_vals.end());
+    std::sort(scratch.begin(), scratch.end());
     size_t p99_idx = static_cast<size_t>(0.99 * static_cast<double>(ws.count - 1));
-    ws.p99 = sorted_vals[p99_idx];
+    ws.p99 = scratch[p99_idx];
 
     ws.valid = true;
     return ws;
