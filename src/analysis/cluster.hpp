@@ -84,6 +84,9 @@ public:
     void set_sample_ratio(float ratio) { sample_ratio_ = ratio; }
     float sample_ratio() const { return sample_ratio_; }
 
+    // D-10: gate O(N^2) dedup; off by default, user-toggled via prefs
+    void set_dedup_enabled(bool enabled) { dedup_enabled_ = enabled; }
+
     // Synchronous load — call from background thread.
     void load();
 
@@ -170,7 +173,8 @@ private:
     };
     std::unordered_map<size_t, std::vector<DedupAlt>> dedup_alts_;
 
-    float                     sample_ratio_ = 1.0f;
+    float                     sample_ratio_   = 1.0f;
+    bool                      dedup_enabled_  = false;
 
     std::atomic<LoadState>    state_    { LoadState::Idle };
     std::atomic<float>        progress_ { 0.0f };

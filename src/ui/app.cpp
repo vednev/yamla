@@ -745,6 +745,7 @@ void App::start_load(const std::vector<std::string>& paths) {
 
     s.cluster = std::make_unique<Cluster>();
     s.cluster->set_sample_ratio(s.sample_ratio);
+    s.cluster->set_dedup_enabled(prefs_.dedup_enabled);
     for (const auto& p : paths)
         s.cluster->add_file(p);
 
@@ -779,6 +780,7 @@ void App::append_load(const std::vector<std::string>& paths) {
     }
 
     // Capture the paths for the background thread
+    s.cluster->set_dedup_enabled(prefs_.dedup_enabled);
     std::vector<std::string> new_paths = paths;
     s.load_thread = std::thread([&s, new_paths = std::move(new_paths)] {
         s.cluster->append_files(new_paths);

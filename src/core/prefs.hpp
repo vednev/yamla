@@ -11,6 +11,7 @@ struct Prefs {
     int         font_size         = 13;      // 10–20 pt
     int         memory_limit_gb   = 0;       // 0 = auto (60% of total RAM)
     bool        prefer_checkboxes = false;   // show bar charts as checkbox lists
+    bool        dedup_enabled     = false;   // D-10: off by default; O(N^2) dedup skipped unless toggled on
 
     // LLM integration
     std::string llm_api_key;                                        // Azure Foundry API key

@@ -80,6 +80,11 @@ Prefs PrefsManager::load() {
     parse_int("\"ckbox\"",  ckbox);
     p.prefer_checkboxes = (ckbox != 0);
 
+    // dedup_enabled stored as 0/1 int (default false — D-10)
+    int dedup = p.dedup_enabled ? 1 : 0;
+    parse_int("\"dedup\"", dedup);
+    p.dedup_enabled = (dedup != 0);
+
     // LLM fields
     parse_str("\"llm_key\"",      p.llm_api_key);
     parse_str("\"llm_endpoint\"", p.llm_endpoint);
@@ -165,14 +170,14 @@ void PrefsManager::save(const Prefs& p) {
     rf += "]";
 
     std::fprintf(f,
-        "{\"font\":\"%s\",\"size\":%d,\"mem_gb\":%d,\"ckbox\":%d,"
+        "{\"font\":\"%s\",\"size\":%d,\"mem_gb\":%d,\"ckbox\":%d,\"dedup\":%d,"
         "\"llm_key\":\"%s\",\"llm_endpoint\":\"%s\","
         "\"llm_model\":\"%s\",\"llm_maxtok\":%d,"
         "\"export_dir\":\"%s\",\"chart_cols\":%d,"
         "\"last_dir\":\"%s\","
         "\"recent_files\":%s}\n",
         json_escape(p.font_name).c_str(), p.font_size, p.memory_limit_gb,
-        p.prefer_checkboxes ? 1 : 0,
+        p.prefer_checkboxes ? 1 : 0, p.dedup_enabled ? 1 : 0,
         json_escape(p.llm_api_key).c_str(), json_escape(p.llm_endpoint).c_str(),
         json_escape(p.llm_model).c_str(), p.llm_max_tokens,
         json_escape(p.export_dir).c_str(), p.chart_layout_columns,

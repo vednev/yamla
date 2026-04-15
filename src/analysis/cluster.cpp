@@ -493,7 +493,7 @@ void Cluster::load() {
 
         sort_entries_by_time();
         scratch_chain_.reset();  // free merge-sort scratch memory
-        dedup_entries();
+        if (dedup_enabled_) dedup_entries();
         merge_nodes();
 
         analysis_ = Analyzer::analyze(*entries_, *strings_);
@@ -598,7 +598,7 @@ void Cluster::append_files(const std::vector<std::string>& new_paths) {
 
         sort_entries_by_time();
         scratch_chain_.reset();  // free merge-sort scratch memory
-        dedup_entries();
+        if (dedup_enabled_) dedup_entries();
         merge_nodes();
 
         analysis_ = Analyzer::analyze(*entries_, *strings_);
