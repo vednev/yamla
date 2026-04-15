@@ -610,19 +610,26 @@ void ChartPanelView::render_chart(const MetricSeries& series,
 
         // Threshold gradient fill + line (D-83/D-84)
         if (has_threshold && !plot_x.empty()) {
-            // Gradient fill from threshold up to chart top:
-            // transparent at threshold → semi-transparent red at top.
-            // Uses GetPlotDrawList for per-vertex color gradient.
-            ImDrawList* dl = ImPlot::GetPlotDrawList();
-            ImVec2 p_lo = ImPlot::PlotToPixels(x_view_min_, thresh);
-            ImVec2 p_hi = ImPlot::PlotToPixels(x_view_max_, y_hi);
-            ImU32 col_bottom = IM_COL32(255, 60, 60, 0);   // transparent at threshold
-            ImU32 col_top    = IM_COL32(255, 60, 60, 50);  // semi-transparent red at top
-            dl->AddRectFilledMultiColor(
-                ImVec2(p_lo.x, p_hi.y),  // top-left (screen: smaller Y)
-                ImVec2(p_hi.x, p_lo.y),  // bottom-right (screen: larger Y)
-                col_top, col_top,         // top-left, top-right
-                col_bottom, col_bottom);  // bottom-left, bottom-right
+            // Only draw gradient when threshold is within or below
+            // the visible Y range.  When thresh >= y_hi the entire
+            // chart is below the threshold — no danger zone to show.
+            if (thresh < y_hi) {
+                double grad_bottom = std::max(thresh, y_lo);
+                ImDrawList* dl = ImPlot::GetPlotDrawList();
+                ImVec2 p_bot = ImPlot::PlotToPixels(x_view_min_, grad_bottom);
+                ImVec2 p_top = ImPlot::PlotToPixels(x_view_max_, y_hi);
+                // When threshold is below visible range, entire chart
+                // is in the danger zone — use uniform subtle tint.
+                ImU32 col_bottom = (thresh <= y_lo)
+                    ? IM_COL32(255, 60, 60, 25)
+                    : IM_COL32(255, 60, 60, 0);
+                ImU32 col_top = IM_COL32(255, 60, 60, 50);
+                dl->AddRectFilledMultiColor(
+                    ImVec2(p_top.x, p_top.y),   // top-left
+                    ImVec2(p_bot.x, p_bot.y),   // bottom-right
+                    col_top, col_top,
+                    col_bottom, col_bottom);
+            }
 
             // Thin threshold line for precise reference
             ImPlot::SetNextLineStyle(ImVec4(1.0f, 0.4f, 0.4f, 0.8f), 1.0f);
@@ -632,7 +639,7 @@ void ChartPanelView::render_chart(const MetricSeries& series,
 
         // Main data line — thicker for visibility (D-80)
         if (!plot_x.empty()) {
-            ImPlot::SetNextLineStyle(IMPLOT_AUTO_COL, 2.0f);
+            ImPlot::SetNextLineStyle(ImVec4(0.40f, 0.70f, 1.0f, 1.0f), 2.0f);
             ImPlot::PlotLine(series.display_name.c_str(),
                              plot_x.data(), plot_y.data(),
                              static_cast<int>(plot_x.size()));

@@ -325,6 +325,14 @@ bool App::init() {
     ImPlot::CreateContext();
     ImPlot::GetStyle().Use24HourClock = true;
 
+    // Configure ImPlot for pure-black terminal theme:
+    // - Opaque black plot background (prevents semi-transparent overlay artifacts)
+    // - Transparent frame background (chart area blends with window)
+    ImPlotStyle& ps = ImPlot::GetStyle();
+    ps.Colors[ImPlotCol_FrameBg]    = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
+    ps.Colors[ImPlotCol_PlotBg]     = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
+    ps.Colors[ImPlotCol_PlotBorder] = ImVec4(0.35f, 0.35f, 0.35f, 1.0f);
+
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
