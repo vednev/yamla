@@ -16,6 +16,7 @@
 
 // ---- Helpers ----
 static constexpr ImVec4 COL_CROSSHAIR      = ImVec4(1.0f, 1.0f, 1.0f, 0.50f);
+static constexpr ImVec4 COL_GUIDEMARK      = ImVec4(1.0f, 0.65f, 0.0f, 0.90f);  // amber/orange
 static constexpr ImVec4 COL_ANNOTATION_ERR = ImVec4(1.0f, 0.3f, 0.3f, 0.80f);
 static constexpr ImVec4 COL_ANNOTATION_WARN= ImVec4(1.0f, 0.8f, 0.0f, 0.80f);
 static constexpr ImVec4 COL_STATS          = ImVec4(0.55f, 0.55f, 0.55f, 1.0f);
@@ -665,6 +666,17 @@ void ChartPanelView::render_chart(const MetricSeries& series,
             ImPlot::PlotInfLines("##crosshair", &crosshair_x_, 1);
         }
 
+        // Guidemarks -- numbered vertical lines across all charts (Phase 9)
+        for (const auto& gm : marks_) {
+            ImPlot::SetNextLineStyle(COL_GUIDEMARK, 1.5f);
+            char gm_id[32];
+            std::snprintf(gm_id, sizeof(gm_id), "##gm_%d", gm.number);
+            ImPlot::PlotInfLines(gm_id, &gm.x, 1);
+            // Number label at top of chart data area (D-95: "at the top of each chart, above the data area")
+            ImPlotRect lims = ImPlot::GetPlotLimits();
+            ImPlot::Annotation(gm.x, lims.Y.Max, COL_GUIDEMARK, ImVec2(0, -4), true, "%d", gm.number);
+        }
+
         // ---- Mouse interaction (manual, since NoInputs is set) ----
         bool plot_hovered = ImPlot::IsPlotHovered();
         if (plot_hovered) {
@@ -674,29 +686,33 @@ void ChartPanelView::render_chart(const MetricSeries& series,
             // Tooltip: YYYY-MM-DD HH:MM:SS.mmm + value with unit (D-82)
             if (!dragging_) {
                 ImGui::BeginTooltip();
-                // Line 1: formatted timestamp with milliseconds
-                int64_t t_ms = plot_to_ms(crosshair_x_);
-                time_t  t_sec = static_cast<time_t>(t_ms / 1000);
-                int     t_frac_ms = static_cast<int>(t_ms % 1000);
-                struct tm tm_buf;
+                if (mark_mode_) {
+                    ImGui::TextDisabled("Click to place mark #%d", next_mark_number_);
+                } else {
+                    // Line 1: formatted timestamp with milliseconds
+                    int64_t t_ms = plot_to_ms(crosshair_x_);
+                    time_t  t_sec = static_cast<time_t>(t_ms / 1000);
+                    int     t_frac_ms = static_cast<int>(t_ms % 1000);
+                    struct tm tm_buf;
 #if defined(_WIN32)
-                localtime_s(&tm_buf, &t_sec);
+                    localtime_s(&tm_buf, &t_sec);
 #else
-                localtime_r(&t_sec, &tm_buf);
+                    localtime_r(&t_sec, &tm_buf);
 #endif
-                char time_str[32];
-                std::strftime(time_str, sizeof(time_str),
-                              "%Y-%m-%d %H:%M:%S", &tm_buf);
-                ImGui::TextDisabled("%s.%03d", time_str, t_frac_ms);
+                    char time_str[32];
+                    std::strftime(time_str, sizeof(time_str),
+                                  "%Y-%m-%d %H:%M:%S", &tm_buf);
+                    ImGui::TextDisabled("%s.%03d", time_str, t_frac_ms);
 
-                // Line 2: value with unit
-                size_t hover_idx = FtdcAnalyzer::find_sample_at(ts,
-                    plot_to_ms(crosshair_x_));
-                if (hover_idx < values.size()) {
-                    char val_buf[64];
-                    fmt_metric_value(val_buf, sizeof(val_buf),
-                                     values[hover_idx], series.unit);
-                    ImGui::Text("%s", val_buf);
+                    // Line 2: value with unit
+                    size_t hover_idx = FtdcAnalyzer::find_sample_at(ts,
+                        plot_to_ms(crosshair_x_));
+                    if (hover_idx < values.size()) {
+                        char val_buf[64];
+                        fmt_metric_value(val_buf, sizeof(val_buf),
+                                         values[hover_idx], series.unit);
+                        ImGui::Text("%s", val_buf);
+                    }
                 }
                 ImGui::EndTooltip();
             }
@@ -710,7 +726,8 @@ void ChartPanelView::render_chart(const MetricSeries& series,
         }
 
         // Draw drag highlight band (across all charts via shared state)
-        if (dragging_) {
+        // Suppressed in mark mode -- dragging is disabled (D-92)
+        if (dragging_ && !mark_mode_) {
             // Get current mouse X in this plot's coordinate space
             double cur_x = ImPlot::GetPlotMousePos().x;
             double lo = std::min(drag_start_x_, cur_x);
@@ -734,6 +751,14 @@ void ChartPanelView::render_chart(const MetricSeries& series,
             if (ImGui::IsMouseReleased(0) && !drag_committed_) {
                 drag_committed_ = true;
                 drag_end_x_     = cur_x;
+                drag_end_px_x_  = ImGui::GetMousePos().x;
+            }
+        }
+        // In mark mode, still capture mouse release for click detection (D-91)
+        if (dragging_ && mark_mode_) {
+            if (ImGui::IsMouseReleased(0) && !drag_committed_) {
+                drag_committed_ = true;
+                drag_end_x_     = ImPlot::GetPlotMousePos().x;
                 drag_end_px_x_  = ImGui::GetMousePos().x;
             }
         }
@@ -896,6 +921,55 @@ void ChartPanelView::render_inner() {
             if (ImGui::Combo("##col_count", &col_idx, col_labels, 3)) {
                 layout_columns_ = col_idx + 2;
                 effective_cols = layout_columns_;
+            }
+        }
+
+        ImGui::PopStyleVar(2);
+    }
+
+    // Mark mode toggle + Clear button -- right-aligned (D-97, D-98, D-99)
+    {
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 3.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(2, 0));
+
+        float mark_btn_w  = ImGui::CalcTextSize("Mark").x
+                          + ImGui::GetStyle().FramePadding.x * 2.0f + 4.0f;
+        bool show_clear   = mark_mode_ || !marks_.empty();
+        float clear_btn_w = show_clear
+                          ? (ImGui::CalcTextSize("Clear").x
+                             + ImGui::GetStyle().FramePadding.x * 2.0f + 4.0f + 4.0f)
+                          : 0.0f;
+        float right_edge  = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
+        float jump_x      = right_edge - mark_btn_w - clear_btn_w;
+
+        // Guard against overflow on narrow windows (Pitfall 4)
+        if (jump_x > ImGui::GetCursorPosX()) {
+            ImGui::SameLine(jump_x);
+        } else {
+            ImGui::SameLine();
+        }
+
+        // Mark toggle (D-98: highlighted when active)
+        if (mark_mode_) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.25f, 0.35f, 1.0f));
+        if (ImGui::SmallButton("Mark")) {
+            mark_mode_ = !mark_mode_;
+            // Addresses review concern HIGH: drag-cancel guard on mode toggle.
+            // If user toggles Mark mode while a drag is in progress, cancel the
+            // stale drag to prevent it from dispatching as a zoom or time-filter
+            // action in the wrong mode, or leaving drag state orphaned.
+            if (dragging_) {
+                dragging_       = false;
+                drag_committed_ = false;
+            }
+        }
+        if (mark_mode_) ImGui::PopStyleColor();
+
+        // Clear button -- only visible when marks exist or mark mode active (D-99)
+        if (show_clear) {
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Clear")) {
+                marks_.clear();
+                next_mark_number_ = 1;  // D-101: reset counter
             }
         }
 
@@ -1115,27 +1189,35 @@ void ChartPanelView::render_inner() {
         }
     }
 
-    // Apply drag-to-zoom after all charts have rendered
+    // Apply drag-to-zoom / mark placement after all charts have rendered
     if (drag_committed_) {
         drag_committed_ = false;
         dragging_       = false;
         float px_moved  = std::abs(drag_end_px_x_ - drag_start_px_x_);
 
-        if (px_moved > 5.0f) {
-            double lo = std::min(drag_start_x_, drag_end_x_);
-            double hi = std::max(drag_start_x_, drag_end_x_);
-            if (hi - lo > 1.0) {
-                x_view_min_ = std::max(lo, x_min_);
-                x_view_max_ = std::min(hi, x_max_);
+        if (mark_mode_) {
+            // Mark mode (D-91): quick-clicks place guidemarks, drags ignored (D-92)
+            if (px_moved <= 5.0f) {
+                marks_.push_back({drag_end_x_, next_mark_number_++});
             }
         } else {
-            // Quick click: set ±30s time window filter for cross-view linking
-            if (filter_) {
-                int64_t click_ms = plot_to_ms(drag_end_x_);
-                filter_->time_window_active   = true;
-                filter_->time_window_start_ms = click_ms - 30000LL;
-                filter_->time_window_end_ms   = click_ms + 30000LL;
-                if (on_time_click_) on_time_click_(click_ms);
+            // Normal mode (D-93): behavior unchanged
+            if (px_moved > 5.0f) {
+                double lo = std::min(drag_start_x_, drag_end_x_);
+                double hi = std::max(drag_start_x_, drag_end_x_);
+                if (hi - lo > 1.0) {
+                    x_view_min_ = std::max(lo, x_min_);
+                    x_view_max_ = std::min(hi, x_max_);
+                }
+            } else {
+                // Quick click: set ±30s time window filter for cross-view linking
+                if (filter_) {
+                    int64_t click_ms = plot_to_ms(drag_end_x_);
+                    filter_->time_window_active   = true;
+                    filter_->time_window_start_ms = click_ms - 30000LL;
+                    filter_->time_window_end_ms   = click_ms + 30000LL;
+                    if (on_time_click_) on_time_click_(click_ms);
+                }
             }
         }
     }

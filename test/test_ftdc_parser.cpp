@@ -90,7 +90,7 @@ TEST_CASE("FtdcParser: metric definitions are applied", "[ftdc_parser]") {
     // serverStatus.connections.current is a gauge, not cumulative
     const MetricSeries* conns = store.get("serverStatus.connections.current");
     REQUIRE(conns != nullptr);
-    REQUIRE(conns->display_name == "Connections Current");
+    REQUIRE(conns->display_name == "Conns Current");
     REQUIRE(conns->unit == "count");
     REQUIRE(conns->is_cumulative == false);
 }

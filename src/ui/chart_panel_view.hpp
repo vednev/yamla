@@ -148,6 +148,15 @@ private:
 
     int layout_columns_ = 0;  // 0=auto, 1=list, 2/3/4=grid columns
 
+    // Guidemark state (Phase 9)
+    struct GuideMark {
+        double x;       // epoch seconds (plot-space)
+        int    number;  // 1-based incrementing counter
+    };
+    bool                   mark_mode_        = false;
+    std::vector<GuideMark> marks_;
+    int                    next_mark_number_ = 1;
+
     static constexpr float CHART_HEIGHT   = 140.0f;
     static constexpr float MINIMAP_HEIGHT = 56.0f;  // taller to fit time labels
     static constexpr float STATS_HEIGHT   = 18.0f;
