@@ -68,7 +68,7 @@ endif
 # host microarchitecture, e.g. on GitHub's virtualised arm64 runners).
 # Use -O3 only; simdjson's runtime dispatch still selects the best SIMD path.
 MARCH := $(if $(CI),,-march=native)
-CXXFLAGS := -std=c++17 -O3 $(MARCH) -Wall -Wextra -Wno-unused-parameter \
+CXXFLAGS := -std=c++17 -O3 $(MARCH) -flto=thin -Wall -Wextra -Wno-unused-parameter \
             -Isrc \
             -I$(IMGUI_BIND) \
             -Ivendor/httplib \
@@ -79,7 +79,7 @@ CXXFLAGS := -std=c++17 -O3 $(MARCH) -Wall -Wextra -Wno-unused-parameter \
 # C flags for md4c (compiled as C, not C++)
 CFLAGS := -O3 $(MARCH) -Wall -Ivendor/md4c
 
-LDFLAGS := $(PKG_LIBS) $(PLATFORM_LIBS)
+LDFLAGS := -flto=thin $(PKG_LIBS) $(PLATFORM_LIBS)
 
 TARGET   := yamla
 BUILDDIR := build/obj
@@ -106,7 +106,7 @@ ALL_OBJS := $(OBJS) $(BACKEND_OBJS) $(VENDOR_C_OBJS) $(VENDOR_NFD_OBJS)
 
 # ---- Targets -----------------------------------------------
 
-.PHONY: all deps clean run test
+.PHONY: all deps clean run test debug
 
 all: $(TARGET)
 
@@ -197,3 +197,51 @@ test: $(TEST_OBJS) $(TEST_DEP_OBJS)
 $(BUILDDIR)/test/%.o: test/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(TEST_CXXFLAGS) -c $< -o $@
+
+# ---- Debug target (ASan + no optimization) -------------------
+DEBUG_BUILDDIR := build/obj-debug
+DEBUG_TARGET   := yamla-debug
+
+DEBUG_CXXFLAGS := -std=c++17 -O0 -g -fsanitize=address -fno-omit-frame-pointer \
+                  -Isrc \
+                  -I$(IMGUI_BIND) \
+                  -Ivendor/httplib \
+                  -Ivendor/md4c \
+                  -Ivendor/nfd \
+                  $(PKG_CFLAGS) $(PLATFORM_CFLAGS)
+
+DEBUG_LDFLAGS := -fsanitize=address $(PKG_LIBS) $(PLATFORM_LIBS)
+
+DEBUG_OBJS     := $(patsubst $(SRCDIR)/%.cpp, $(DEBUG_BUILDDIR)/%.o, $(SRCS))
+DEBUG_BACKEND  := $(patsubst build/obj/backends/%, $(DEBUG_BUILDDIR)/backends/%, $(BACKEND_OBJS))
+DEBUG_VENDOR_C := $(DEBUG_BUILDDIR)/vendor/md4c.o
+ifeq ($(UNAME), Darwin)
+  DEBUG_VENDOR_NFD := $(DEBUG_BUILDDIR)/vendor/nfd_cocoa.o
+else
+  DEBUG_VENDOR_NFD := $(DEBUG_BUILDDIR)/vendor/nfd_gtk.o
+endif
+DEBUG_ALL_OBJS := $(DEBUG_OBJS) $(DEBUG_BACKEND) $(DEBUG_VENDOR_C) $(DEBUG_VENDOR_NFD)
+
+debug: $(DEBUG_ALL_OBJS)
+	$(CXX) $(DEBUG_CXXFLAGS) -o $(DEBUG_TARGET) $^ $(DEBUG_LDFLAGS)
+	@echo "Built $(DEBUG_TARGET) (debug+asan)"
+
+$(DEBUG_BUILDDIR)/%.o: $(SRCDIR)/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(DEBUG_CXXFLAGS) -c $< -o $@
+
+$(DEBUG_BUILDDIR)/backends/%.o: $(IMGUI_BIND)/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(DEBUG_CXXFLAGS) -c $< -o $@
+
+$(DEBUG_BUILDDIR)/vendor/md4c.o: vendor/md4c/md4c.c
+	@mkdir -p $(dir $@)
+	$(CC) -O0 -g -fsanitize=address -Wall -Ivendor/md4c -c $< -o $@
+
+$(DEBUG_BUILDDIR)/vendor/nfd_cocoa.o: vendor/nfd/nfd_cocoa.m
+	@mkdir -p $(dir $@)
+	$(CC) -O0 -g -fsanitize=address -Ivendor/nfd $(SDL2_CFLAGS) -fno-objc-arc -c $< -o $@
+
+$(DEBUG_BUILDDIR)/vendor/nfd_gtk.o: vendor/nfd/nfd_gtk.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(DEBUG_CXXFLAGS) -c $< -o $@
