@@ -176,7 +176,8 @@ private:
     PrefsView       prefs_view_;
     Prefs           prefs_;
 
-    // D-13: developer memory/timing overlay, toggled via F12
+    // D-13: developer memory/timing overlay, toggled via Help → Debug Panel
+    // (menu item and renderer compiled in only when YAMLA_DEBUG_BUILD is defined)
     DebugPanel debug_panel_;
 
     bool      running_ = true;

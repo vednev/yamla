@@ -12,7 +12,8 @@ struct TimingStats;
 // ------------------------------------------------------------
 //  DebugPanel — developer-only memory + timing overlay (D-13)
 //
-//  Hidden by default. Toggled via F12 keyboard shortcut in App.
+//  Hidden by default. Toggled via Help → Debug Panel menu item
+//  (only built into yamla-debug; gated by YAMLA_DEBUG_BUILD in App).
 //  Non-owning pointers to data sources; data must outlive panel.
 // ------------------------------------------------------------
 class DebugPanel {

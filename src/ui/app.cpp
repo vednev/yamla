@@ -828,6 +828,11 @@ void App::render_menu_bar() {
         if (ImGui::BeginMenu("Help")) {
             if (ImGui::MenuItem("AI Assistant", "Ctrl+A"))
                 active_session().chat_view.toggle();
+#ifdef YAMLA_DEBUG_BUILD
+            ImGui::Separator();
+            if (ImGui::MenuItem("Debug Panel", nullptr, debug_panel_.visible))
+                debug_panel_.toggle();
+#endif
             ImGui::EndMenu();
         }
 
@@ -1452,7 +1457,8 @@ void App::render_frame() {
     render_loading_popup();
     prefs_view_.render();
 
-    // D-13: Debug overlay (F12 toggle)
+#ifdef YAMLA_DEBUG_BUILD
+    // D-13: Debug overlay (Help → Debug Panel) — debug builds only
     if (debug_panel_.visible) {
         // Wire sources from the active session each frame (sessions may change)
         Session* act = sessions_.empty() ? nullptr : sessions_[active_session_idx_].get();
@@ -1469,11 +1475,12 @@ void App::render_frame() {
         ImGui::SetNextWindowBgAlpha(0.85f);
         ImGui::SetNextWindowPos(ImVec2(10.0f, 30.0f), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(380.0f, 220.0f), ImGuiCond_FirstUseEver);
-        if (ImGui::Begin("Debug (F12)", &debug_panel_.visible)) {
+        if (ImGui::Begin("Debug Panel", &debug_panel_.visible)) {
             debug_panel_.render_inner();
         }
         ImGui::End();
     }
+#endif
 
     active_session().chat_view.render();
 
@@ -1521,11 +1528,6 @@ void App::handle_sdl_event(const SDL_Event& event) {
             break;
 
         case SDL_KEYDOWN:
-            // F12: toggle developer debug overlay (D-13)
-            if (event.key.keysym.sym == SDLK_F12) {
-                debug_panel_.toggle();
-                break;
-            }
             if (event.key.keysym.mod & KMOD_ALT &&
                 event.key.keysym.sym == SDLK_F4)
                 running_ = false;
