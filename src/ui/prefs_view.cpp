@@ -119,6 +119,12 @@ void PrefsView::render() {
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Show Severity and Op Type as checkbox lists\n"
                           "instead of bar charts");
+    ImGui::Checkbox("Enable dedup (O(N^2), reload required)", &staging_.dedup_enabled);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "Deduplicates identical log entries across files.\n"
+            "Off by default for performance. Takes effect on next file load.");
+    }
 
     // ---- LLM configuration ------------------------------------
     ImGui::Spacing();

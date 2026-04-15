@@ -1451,6 +1451,30 @@ void App::render_frame() {
     render_dockspace();
     render_loading_popup();
     prefs_view_.render();
+
+    // D-13: Debug overlay (F12 toggle)
+    if (debug_panel_.visible) {
+        // Wire sources from the active session each frame (sessions may change)
+        Session* act = sessions_.empty() ? nullptr : sessions_[active_session_idx_].get();
+        if (act) {
+            debug_panel_.set_sources(
+                act->cluster ? &act->cluster->string_chain() : nullptr,
+                act->cluster ? &act->cluster->entry_chain()  : nullptr,
+                act->cluster ? &act->cluster->strings()      : nullptr,
+                act->ftdc_view.metric_store(),
+                &act->timing);
+        } else {
+            debug_panel_.set_sources(nullptr, nullptr, nullptr, nullptr, nullptr);
+        }
+        ImGui::SetNextWindowBgAlpha(0.85f);
+        ImGui::SetNextWindowPos(ImVec2(10.0f, 30.0f), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(380.0f, 220.0f), ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("Debug (F12)", &debug_panel_.visible)) {
+            debug_panel_.render_inner();
+        }
+        ImGui::End();
+    }
+
     active_session().chat_view.render();
 
     // ---- Close session confirmation dialog (D-42) ----
@@ -1502,6 +1526,11 @@ int App::run() {
                     break;
 
                 case SDL_KEYDOWN:
+                    // F12: toggle developer debug overlay (D-13)
+                    if (event.key.keysym.sym == SDLK_F12) {
+                        debug_panel_.toggle();
+                        break;
+                    }
                     if (event.key.keysym.mod & KMOD_ALT &&
                         event.key.keysym.sym == SDLK_F4)
                         running_ = false;

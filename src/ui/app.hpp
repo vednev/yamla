@@ -31,6 +31,7 @@ struct ID3D11RenderTargetView;
 #include "chat_view.hpp"
 #include "ftdc_view.hpp"
 #include "file_picker.hpp"
+#include "debug_panel.hpp"
 
 // ------------------------------------------------------------
 //  Session — one independent analysis session
@@ -173,6 +174,9 @@ private:
     FontManager     font_mgr_;
     PrefsView       prefs_view_;
     Prefs           prefs_;
+
+    // D-13: developer memory/timing overlay, toggled via F12
+    DebugPanel debug_panel_;
 
     bool      running_ = true;
 

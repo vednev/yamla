@@ -56,6 +56,13 @@ public:
         return cluster_ ? cluster_->state() : FtdcLoadState::Idle;
     }
 
+    // D-13: access metric store for debug panel (nullptr if not loaded)
+    const MetricStore* metric_store() const {
+        if (cluster_ && cluster_->state() == FtdcLoadState::Ready && cluster_->has_store())
+            return &cluster_->store();
+        return nullptr;
+    }
+
 private:
     void on_selection_changed();
 
