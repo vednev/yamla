@@ -5,6 +5,7 @@
 #include <cctype>
 #include <cstring>
 #include <algorithm>
+#include <string_view>
 
 #include "../parser/log_entry.hpp"
 #include "../analysis/cluster.hpp"
@@ -35,6 +36,25 @@ void LogView::set_entries(const ChunkVector<LogEntry>* entries,
     entries_ = entries;
     strings_ = strings;
     nodes_   = nodes;
+
+    // D-11: Initialize all dimension bitmasks to the new entry count
+    size_t n = entries_ ? entries_->size() : 0;
+    mask_severity_.resize(n);
+    mask_component_.resize(n);
+    mask_op_type_.resize(n);
+    mask_ns_.resize(n);
+    mask_shape_.resize(n);
+    mask_slow_query_.resize(n);
+    mask_conn_id_.resize(n);
+    mask_driver_.resize(n);
+    mask_node_.resize(n);
+    mask_time_window_.resize(n);
+    mask_text_.resize(n);
+    prev_filter_ = FilterState{}; // reset snapshot
+
+    // D-12: Build trigram index (after parse complete)
+    build_trigram_index();
+
     rebuild_filter_index();
 }
 
@@ -47,7 +67,7 @@ void LogView::set_on_select(SelectCallback cb) {
 }
 
 // ------------------------------------------------------------
-//  entry_matches
+//  entry_matches — retained for correctness fallback
 // ------------------------------------------------------------
 bool LogView::entry_matches(const LogEntry& e) const {
     if (!filter_ || !filter_->active()) return true;
@@ -112,23 +132,400 @@ bool LogView::entry_matches(const LogEntry& e) const {
 }
 
 // ------------------------------------------------------------
-//  rebuild_filter_index
+//  D-12: build_trigram_index
 // ------------------------------------------------------------
-void LogView::rebuild_filter_index() {
-    search_lower_.clear();
-    filtered_indices_.clear();
-    if (!entries_) return;
-    filtered_indices_.reserve(entries_ ? entries_->size() : 0);
-    for (size_t i = 0; entries_ && i < entries_->size(); ++i) {
-        if (entry_matches((*entries_)[i]))
-            filtered_indices_.push_back(i);
+void LogView::build_trigram_index() {
+    trigram_index_.clear();
+    trigram_index_built_ = false;
+    if (!entries_ || !strings_) return;
+    size_t n = entries_->size();
+    trigram_index_.reserve(n * 4); // estimate: avg 4 trigrams per message
+    for (size_t i = 0; i < n; ++i) {
+        const LogEntry& e = (*entries_)[i];
+        if (e.msg_idx == 0) continue; // UNKNOWN sentinel
+        std::string_view msg = strings_->get(e.msg_idx);
+        for (size_t j = 0; j + 2 < msg.size(); ++j) {
+            uint8_t c0 = static_cast<uint8_t>(std::tolower(static_cast<unsigned char>(msg[j])));
+            uint8_t c1 = static_cast<uint8_t>(std::tolower(static_cast<unsigned char>(msg[j+1])));
+            uint8_t c2 = static_cast<uint8_t>(std::tolower(static_cast<unsigned char>(msg[j+2])));
+            uint32_t key = (uint32_t(c0) << 16) | (uint32_t(c1) << 8) | c2;
+            trigram_index_.emplace_back(key, static_cast<uint32_t>(i));
+        }
     }
-    // Respect current sort direction: entries come out ascending
-    // from the ChunkVector, so reverse if user wants descending.
+    std::sort(trigram_index_.begin(), trigram_index_.end());
+    trigram_index_built_ = true;
+}
+
+// ------------------------------------------------------------
+//  D-12: search_trigram
+// ------------------------------------------------------------
+void LogView::search_trigram(const std::string& query, DimensionMask& mask) {
+    size_t n = entries_ ? entries_->size() : 0;
+    if (n == 0) return;
+
+    // For queries < 3 chars, fall back to linear scan
+    if (query.size() < 3 || !trigram_index_built_) {
+        std::string q_lower;
+        q_lower.reserve(query.size());
+        for (char c : query) q_lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        mask.all_pass = false;
+        for (size_t w = 0; w < mask.bits.size(); ++w) mask.bits[w] = 0;
+        for (size_t i = 0; i < n; ++i) {
+            const LogEntry& e = (*entries_)[i];
+            if (e.msg_idx == 0) continue;
+            std::string_view msg = strings_->get(e.msg_idx);
+            bool found = false;
+            for (size_t p = 0; p + q_lower.size() <= msg.size(); ++p) {
+                bool match = true;
+                for (size_t k = 0; k < q_lower.size(); ++k) {
+                    if (std::tolower(static_cast<unsigned char>(msg[p+k])) != static_cast<unsigned char>(q_lower[k])) {
+                        match = false; break;
+                    }
+                }
+                if (match) { found = true; break; }
+            }
+            if (found) mask.set(i, true);
+        }
+        return;
+    }
+
+    // Extract trigrams from query
+    std::vector<uint32_t> query_trigrams;
+    for (size_t j = 0; j + 2 < query.size(); ++j) {
+        uint8_t c0 = static_cast<uint8_t>(std::tolower(static_cast<unsigned char>(query[j])));
+        uint8_t c1 = static_cast<uint8_t>(std::tolower(static_cast<unsigned char>(query[j+1])));
+        uint8_t c2 = static_cast<uint8_t>(std::tolower(static_cast<unsigned char>(query[j+2])));
+        query_trigrams.push_back((uint32_t(c0) << 16) | (uint32_t(c1) << 8) | c2);
+    }
+
+    // Intersect posting lists for each trigram
+    std::vector<uint64_t> candidate_mask((n + 63) / 64, ~uint64_t(0));
+    for (uint32_t trig : query_trigrams) {
+        // Binary search for range [trig, trig] in sorted trigram_index_
+        auto lo = std::lower_bound(trigram_index_.begin(), trigram_index_.end(),
+                                   std::make_pair(trig, uint32_t(0)));
+        auto hi = std::upper_bound(lo, trigram_index_.end(),
+                                   std::make_pair(trig, UINT32_MAX));
+        std::vector<uint64_t> trig_mask((n + 63) / 64, 0);
+        for (auto it = lo; it != hi; ++it) {
+            size_t idx = it->second;
+            trig_mask[idx / 64] |= (uint64_t(1) << (idx % 64));
+        }
+        for (size_t w = 0; w < candidate_mask.size(); ++w)
+            candidate_mask[w] &= trig_mask[w];
+    }
+
+    // Exact-match verify candidates
+    std::string q_lower;
+    q_lower.reserve(query.size());
+    for (char c : query) q_lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    mask.all_pass = false;
+    for (size_t w = 0; w < mask.bits.size(); ++w) mask.bits[w] = 0;
+    for (size_t w = 0; w < candidate_mask.size(); ++w) {
+        uint64_t word = candidate_mask[w];
+        while (word) {
+            int bit = __builtin_ctzll(word);
+            size_t idx = w * 64 + bit;
+            if (idx < n) {
+                const LogEntry& e = (*entries_)[idx];
+                if (e.msg_idx != 0) {
+                    std::string_view msg = strings_->get(e.msg_idx);
+                    for (size_t p = 0; p + q_lower.size() <= msg.size(); ++p) {
+                        bool match = true;
+                        for (size_t k = 0; k < q_lower.size(); ++k) {
+                            if (std::tolower(static_cast<unsigned char>(msg[p+k])) != static_cast<unsigned char>(q_lower[k])) {
+                                match = false; break;
+                            }
+                        }
+                        if (match) { mask.set(idx, true); break; }
+                    }
+                }
+            }
+            word &= word - 1; // clear lowest set bit
+        }
+    }
+}
+
+// ------------------------------------------------------------
+//  D-11: Per-dimension mask rebuild functions
+// ------------------------------------------------------------
+
+void LogView::rebuild_severity_mask() {
+    size_t n = entries_ ? entries_->size() : 0;
+    if (n == 0) return;
+    if (filter_->severity_filter == 0) {
+        mask_severity_.clear_all();
+        return;
+    }
+    mask_severity_.all_pass = false;
+    for (size_t w = 0; w < mask_severity_.bits.size(); ++w) mask_severity_.bits[w] = 0;
+    for (size_t i = 0; i < n; ++i) {
+        bool pass = (static_cast<uint32_t>((*entries_)[i].severity) + 1 == filter_->severity_filter);
+        mask_severity_.set(i, pass);
+    }
+}
+
+void LogView::rebuild_component_mask() {
+    size_t n = entries_ ? entries_->size() : 0;
+    if (n == 0) return;
+    if (filter_->component_idx_include.empty()) {
+        mask_component_.clear_all();
+        return;
+    }
+    mask_component_.all_pass = false;
+    for (size_t w = 0; w < mask_component_.bits.size(); ++w) mask_component_.bits[w] = 0;
+    for (size_t i = 0; i < n; ++i) {
+        bool pass = filter_->component_idx_include.count((*entries_)[i].component_idx) > 0;
+        mask_component_.set(i, pass);
+    }
+}
+
+void LogView::rebuild_op_type_mask() {
+    size_t n = entries_ ? entries_->size() : 0;
+    if (n == 0) return;
+    if (filter_->op_type_idx == 0) {
+        mask_op_type_.clear_all();
+        return;
+    }
+    mask_op_type_.all_pass = false;
+    for (size_t w = 0; w < mask_op_type_.bits.size(); ++w) mask_op_type_.bits[w] = 0;
+    for (size_t i = 0; i < n; ++i) {
+        bool pass = ((*entries_)[i].op_type_idx == filter_->op_type_idx);
+        mask_op_type_.set(i, pass);
+    }
+}
+
+void LogView::rebuild_ns_mask() {
+    size_t n = entries_ ? entries_->size() : 0;
+    if (n == 0) return;
+    if (filter_->ns_idx == 0) {
+        mask_ns_.clear_all();
+        return;
+    }
+    mask_ns_.all_pass = false;
+    for (size_t w = 0; w < mask_ns_.bits.size(); ++w) mask_ns_.bits[w] = 0;
+    for (size_t i = 0; i < n; ++i) {
+        bool pass = ((*entries_)[i].ns_idx == filter_->ns_idx);
+        mask_ns_.set(i, pass);
+    }
+}
+
+void LogView::rebuild_shape_mask() {
+    size_t n = entries_ ? entries_->size() : 0;
+    if (n == 0) return;
+    if (filter_->shape_idx == 0) {
+        mask_shape_.clear_all();
+        return;
+    }
+    mask_shape_.all_pass = false;
+    for (size_t w = 0; w < mask_shape_.bits.size(); ++w) mask_shape_.bits[w] = 0;
+    for (size_t i = 0; i < n; ++i) {
+        bool pass = ((*entries_)[i].shape_idx == filter_->shape_idx);
+        mask_shape_.set(i, pass);
+    }
+}
+
+void LogView::rebuild_slow_query_mask() {
+    size_t n = entries_ ? entries_->size() : 0;
+    if (n == 0) return;
+    if (!filter_->slow_query_only) {
+        mask_slow_query_.clear_all();
+        return;
+    }
+    mask_slow_query_.all_pass = false;
+    for (size_t w = 0; w < mask_slow_query_.bits.size(); ++w) mask_slow_query_.bits[w] = 0;
+    for (size_t i = 0; i < n; ++i) {
+        const LogEntry& e = (*entries_)[i];
+        bool is_slow = false;
+        if (strings_ && e.msg_idx != 0) {
+            std::string_view msg = strings_->get(e.msg_idx);
+            is_slow = (msg.size() >= 4 &&
+                       (msg[0]=='S'||msg[0]=='s') &&
+                       msg[1]=='l' && msg[2]=='o' && msg[3]=='w');
+        }
+        mask_slow_query_.set(i, is_slow);
+    }
+}
+
+void LogView::rebuild_conn_id_mask() {
+    size_t n = entries_ ? entries_->size() : 0;
+    if (n == 0) return;
+    if (filter_->conn_id_include.empty()) {
+        mask_conn_id_.clear_all();
+        return;
+    }
+    mask_conn_id_.all_pass = false;
+    for (size_t w = 0; w < mask_conn_id_.bits.size(); ++w) mask_conn_id_.bits[w] = 0;
+    for (size_t i = 0; i < n; ++i) {
+        bool pass = filter_->conn_id_include.count((*entries_)[i].conn_id) > 0;
+        mask_conn_id_.set(i, pass);
+    }
+}
+
+void LogView::rebuild_driver_mask() {
+    size_t n = entries_ ? entries_->size() : 0;
+    if (n == 0) return;
+    // driver_idx_include (set-based) takes priority; driver_idx (single) is secondary
+    bool has_set    = !filter_->driver_idx_include.empty();
+    bool has_single = (filter_->driver_idx != 0);
+    if (!has_set && !has_single) {
+        mask_driver_.clear_all();
+        return;
+    }
+    mask_driver_.all_pass = false;
+    for (size_t w = 0; w < mask_driver_.bits.size(); ++w) mask_driver_.bits[w] = 0;
+    for (size_t i = 0; i < n; ++i) {
+        uint32_t di = (*entries_)[i].driver_idx;
+        bool pass = false;
+        if (has_set)    pass = filter_->driver_idx_include.count(di) > 0;
+        if (!pass && has_single) pass = (di == filter_->driver_idx);
+        mask_driver_.set(i, pass);
+    }
+}
+
+void LogView::rebuild_node_mask() {
+    size_t n = entries_ ? entries_->size() : 0;
+    if (n == 0) return;
+    if (filter_->node_idx_include.empty()) {
+        mask_node_.clear_all();
+        return;
+    }
+    mask_node_.all_pass = false;
+    for (size_t w = 0; w < mask_node_.bits.size(); ++w) mask_node_.bits[w] = 0;
+    for (size_t i = 0; i < n; ++i) {
+        bool pass = filter_->node_idx_include.count((*entries_)[i].node_idx) > 0;
+        mask_node_.set(i, pass);
+    }
+}
+
+void LogView::rebuild_time_window_mask() {
+    size_t n = entries_ ? entries_->size() : 0;
+    if (n == 0) return;
+    if (!filter_->time_window_active) {
+        mask_time_window_.clear_all();
+        return;
+    }
+    mask_time_window_.all_pass = false;
+    for (size_t w = 0; w < mask_time_window_.bits.size(); ++w) mask_time_window_.bits[w] = 0;
+    for (size_t i = 0; i < n; ++i) {
+        int64_t ts = (*entries_)[i].timestamp_ms;
+        bool pass = (ts >= filter_->time_window_start_ms && ts <= filter_->time_window_end_ms);
+        mask_time_window_.set(i, pass);
+    }
+}
+
+void LogView::rebuild_text_mask() {
+    if (!filter_ || filter_->text_search.empty()) {
+        mask_text_.clear_all();
+        return;
+    }
+    search_trigram(filter_->text_search, mask_text_);
+}
+
+void LogView::rebuild_all_dimension_masks() {
+    if (!filter_) return;
+    rebuild_severity_mask();
+    rebuild_component_mask();
+    rebuild_op_type_mask();
+    rebuild_ns_mask();
+    rebuild_shape_mask();
+    rebuild_slow_query_mask();
+    rebuild_conn_id_mask();
+    rebuild_driver_mask();
+    rebuild_node_mask();
+    rebuild_time_window_mask();
+    rebuild_text_mask();
+}
+
+// ------------------------------------------------------------
+//  D-11: apply_combined_masks
+// ------------------------------------------------------------
+void LogView::apply_combined_masks() {
+    size_t n = entries_ ? entries_->size() : 0;
+    if (n == 0) { filtered_indices_.clear(); return; }
+    size_t words = (n + 63) / 64;
+    std::vector<const DimensionMask*> active;
+    for (auto* m : {&mask_severity_, &mask_component_, &mask_op_type_,
+                    &mask_ns_, &mask_shape_, &mask_slow_query_,
+                    &mask_conn_id_, &mask_driver_, &mask_node_,
+                    &mask_time_window_, &mask_text_})
+        if (!m->all_pass) active.push_back(m);
+    auto combined = and_masks(active, words);
+    filtered_indices_.clear();
+    filtered_indices_.reserve(n / 2);
+    for (size_t w = 0; w < words; ++w) {
+        uint64_t word = combined[w];
+        while (word) {
+            int bit = __builtin_ctzll(word);
+            size_t idx = w * 64 + bit;
+            if (idx < n) filtered_indices_.push_back(idx);
+            word &= word - 1;
+        }
+    }
     if (!sort_ascending_)
         std::reverse(filtered_indices_.begin(), filtered_indices_.end());
-
     selected_row_ = -1;
+}
+
+// ------------------------------------------------------------
+//  rebuild_filter_index — incremental per-dimension bitmask path
+// ------------------------------------------------------------
+void LogView::rebuild_filter_index() {
+    if (!entries_ || !filter_) {
+        filtered_indices_.clear();
+        return;
+    }
+
+    // On first call after set_entries, masks are already sized (set_entries does it).
+    // If masks are empty (e.g. filter set before entries), size them now.
+    bool first_call = mask_severity_.bits.empty();
+    if (first_call) {
+        size_t n = entries_->size();
+        mask_severity_.resize(n); mask_component_.resize(n);
+        mask_op_type_.resize(n);  mask_ns_.resize(n);
+        mask_shape_.resize(n);    mask_slow_query_.resize(n);
+        mask_conn_id_.resize(n);  mask_driver_.resize(n);
+        mask_node_.resize(n);     mask_time_window_.resize(n);
+        mask_text_.resize(n);
+    }
+
+    // Detect changed dimensions and rebuild only those masks
+    if (first_call || filter_->severity_filter != prev_filter_.severity_filter)
+        rebuild_severity_mask();
+    if (first_call || filter_->component_idx_include != prev_filter_.component_idx_include)
+        rebuild_component_mask();
+    if (first_call || filter_->op_type_idx != prev_filter_.op_type_idx)
+        rebuild_op_type_mask();
+    if (first_call || filter_->ns_idx != prev_filter_.ns_idx)
+        rebuild_ns_mask();
+    if (first_call || filter_->shape_idx != prev_filter_.shape_idx)
+        rebuild_shape_mask();
+    if (first_call || filter_->slow_query_only != prev_filter_.slow_query_only)
+        rebuild_slow_query_mask();
+    if (first_call || filter_->conn_id_include != prev_filter_.conn_id_include)
+        rebuild_conn_id_mask();
+    if (first_call || filter_->driver_idx_include != prev_filter_.driver_idx_include
+                   || filter_->driver_idx != prev_filter_.driver_idx)
+        rebuild_driver_mask();
+    if (first_call || filter_->node_idx_include != prev_filter_.node_idx_include)
+        rebuild_node_mask();
+    if (first_call || filter_->time_window_active != prev_filter_.time_window_active
+                   || filter_->time_window_start_ms != prev_filter_.time_window_start_ms
+                   || filter_->time_window_end_ms != prev_filter_.time_window_end_ms)
+        rebuild_time_window_mask();
+
+    // Text search: handled via debounce in render_inner; also rebuild here when
+    // called directly (e.g. Clear button or non-debounced callers).
+    if (first_call || filter_->text_search != prev_filter_.text_search) {
+        if (filter_->text_search.empty()) {
+            mask_text_.clear_all();
+        } else {
+            search_trigram(filter_->text_search, mask_text_);
+        }
+    }
+
+    prev_filter_ = *filter_;
+    apply_combined_masks();
 }
 
 // ------------------------------------------------------------
@@ -171,12 +568,19 @@ void LogView::render_inner() {
             search_dirty_time_ = ImGui::GetTime();
         }
 
-        // Debounce: rebuild only after DEBOUNCE_MS of inactivity
-        // This keeps the render loop free while the user is typing.
+        // Debounce: rebuild text mask after DEBOUNCE_MS of inactivity.
+        // Only updates the text dimension mask + re-applies combined masks.
         if (search_dirty_) {
             double elapsed_ms = (ImGui::GetTime() - search_dirty_time_) * 1000.0;
             if (elapsed_ms >= DEBOUNCE_MS) {
-                rebuild_filter_index();
+                // Only rebuild text dimension — non-text masks are up to date
+                if (filter_->text_search.empty()) {
+                    mask_text_.clear_all();
+                } else {
+                    search_trigram(filter_->text_search, mask_text_);
+                }
+                prev_filter_.text_search = filter_->text_search;
+                apply_combined_masks();
                 search_dirty_ = false;
             }
         }
