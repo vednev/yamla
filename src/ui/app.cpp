@@ -165,7 +165,10 @@ void App::wire_session(Session& s) {
     });
 
     s.breakdown_view.set_filter(&s.filter);
-    s.breakdown_view.set_on_filter_changed([&s] { s.log_view.rebuild_filter_index(); });
+    s.breakdown_view.set_on_filter_changed([&s] {
+        ScopedTimer _t(s.timing.filter_ms);
+        s.log_view.rebuild_filter_index();
+    });
     s.breakdown_view.set_prefs(&prefs_);
 
     s.ftdc_view.set_filter(&s.filter);
@@ -749,7 +752,10 @@ void App::start_load(const std::vector<std::string>& paths) {
     for (const auto& p : paths)
         s.cluster->add_file(p);
 
-    s.load_thread = std::thread([&s] { s.cluster->load(); });
+    s.load_thread = std::thread([&s] {
+        ScopedTimer _pt(s.timing.parse_ms);
+        s.cluster->load();
+    });
 }
 
 // ------------------------------------------------------------
@@ -783,6 +789,7 @@ void App::append_load(const std::vector<std::string>& paths) {
     s.cluster->set_dedup_enabled(prefs_.dedup_enabled);
     std::vector<std::string> new_paths = paths;
     s.load_thread = std::thread([&s, new_paths = std::move(new_paths)] {
+        ScopedTimer _pt(s.timing.parse_ms);
         s.cluster->append_files(new_paths);
     });
 }
@@ -791,7 +798,9 @@ void App::append_load(const std::vector<std::string>& paths) {
 //  on_filter_changed
 // ------------------------------------------------------------
 void App::on_filter_changed() {
-    active_session().log_view.rebuild_filter_index();
+    Session& s = active_session();
+    ScopedTimer _t(s.timing.filter_ms);
+    s.log_view.rebuild_filter_index();
 }
 
 // NOTE: open_log_folder_dialog(), open_log_file_dialog(), and
@@ -1252,6 +1261,22 @@ void App::render_loading_popup() {
 //  render_frame
 // ------------------------------------------------------------
 void App::render_frame() {
+    // D-02: Measure frame render duration for active session (NullableTimer RAII)
+    struct NullableTimer {
+        using Clock = std::chrono::steady_clock;
+        Clock::time_point start = Clock::now();
+        double* out;
+        explicit NullableTimer(double* p) : out(p) {}
+        ~NullableTimer() {
+            if (out) *out = std::chrono::duration<double, std::milli>(
+                                Clock::now() - start).count();
+        }
+    };
+    double* frame_ms_ptr = nullptr;
+    if (!sessions_.empty())
+        frame_ms_ptr = &sessions_[active_session_idx_]->timing.frame_ms;
+    NullableTimer _frame_timer(frame_ms_ptr);
+
     // Poll ALL sessions for load completion (D-49: inactive sessions
     // still detect transitions)
     for (auto& sp : sessions_) {
@@ -1286,6 +1311,14 @@ void App::render_frame() {
                         s.log_entry_ptrs.push_back(&entries[i]);
                 }
                 s.ftdc_view.set_log_data(&s.log_entry_ptrs, &s.cluster->strings());
+
+                // D-13: Update total memory snapshot for debug panel
+                {
+                    size_t mem = 0;
+                    mem += s.cluster->string_chain().approximate_used();
+                    mem += s.cluster->entry_chain().approximate_used();
+                    s.timing.memory_bytes = mem;
+                }
 
                 // Check for files that failed to parse (active session only)
                 if (&s == &active_session() &&

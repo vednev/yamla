@@ -21,6 +21,7 @@ struct ID3D11RenderTargetView;
 
 #include "../analysis/cluster.hpp"
 #include "../core/prefs.hpp"
+#include "../core/timing.hpp"
 #include "../llm/llm_client.hpp"
 #include "log_view.hpp"
 #include "detail_view.hpp"
@@ -62,6 +63,9 @@ struct Session {
 
     // Flat pointer list for FTDC annotation markers
     std::vector<const LogEntry*> log_entry_ptrs;
+
+    // D-02: Per-session timing stats populated via ScopedTimer at parse/filter/frame
+    TimingStats timing;
 
     // Load state tracking
     LoadState last_cluster_state = LoadState::Idle;

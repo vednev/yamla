@@ -108,6 +108,10 @@ public:
     const AnalysisResult&        analysis() const { return analysis_; }
     const std::vector<NodeInfo>& nodes()    const { return nodes_; }
 
+    // D-13: expose arena references for memory debug panel
+    const ArenaChain& string_chain() const { return string_chain_; }
+    const ArenaChain& entry_chain()  const { return entry_chain_;  }
+
     // All file paths in parse order (indexed by file_idx on LogEntry)
     const std::vector<std::string>& file_paths() const { return file_paths_; }
 
