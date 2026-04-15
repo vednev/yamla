@@ -103,6 +103,17 @@ Plans:
 Plans:
 - [ ] TBD
 
+### Phase 9: Chart Guidemarks for Support Cases
+
+**Goal:** Add a "Mark" mode toggle to the FTDC chart toolbar. When active, clicking on any chart places a numbered vertical guidemark line (1, 2, 3...) with a persistent label. Guidemarks appear across all charts at the clicked X position (shared time axis). Users can screenshot the marked charts and reference specific markers ("at marker 2, latency spikes") in support cases. When Mark mode is off, clicks behave as normal (display nearby log entries). Include a "Clear marks" button to reset all guidemarks.
+
+**Depends on:** Phase 8
+
+**Plans:** 1 plan
+
+Plans:
+- [ ] 09-01-PLAN.md — Guidemark state, rendering, toolbar toggle, click dispatch, and visual verification
+
 ## Backlog
 
 ### Phase 999.6: Dynamic Token Sizing for LLM Requests (BACKLOG)
@@ -144,4 +155,4 @@ Plans:
 ---
 
 *Roadmap created: 2026-04-12*
-*Updated: 2026-04-13 — Phase 7 complete, added backlog 999.7 (session save/restore)*
+*Updated: 2026-04-14 — Phase 9 planned (1 plan, 1 wave)*

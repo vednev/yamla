@@ -668,6 +668,9 @@ void ChartPanelView::render_chart(const MetricSeries& series,
 
         // Guidemarks -- numbered vertical lines across all charts (Phase 9)
         for (const auto& gm : marks_) {
+            // Only render marks within the visible X range to prevent
+            // clamped annotations from stacking at the plot edge
+            if (gm.x < x_view_min_ || gm.x > x_view_max_) continue;
             ImPlot::SetNextLineStyle(COL_GUIDEMARK, 1.5f);
             char gm_id[32];
             std::snprintf(gm_id, sizeof(gm_id), "##gm_%d", gm.number);
