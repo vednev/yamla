@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-04-15T17:02:24.771Z"
+last_updated: "2026-04-15T17:07:18.842Z"
 last_activity: 2026-04-15
 progress:
   total_phases: 13
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 25
-  completed_plans: 21
-  percent: 84
+  completed_plans: 22
+  percent: 88
 ---
 
 # Project State
@@ -61,6 +61,7 @@ None — Phases 1-8 complete (7 done separately).
 - [Phase 10-performance-improvements]: D-08/10-04: doc_buf_ swap pattern for LTO-safe persistent FTDC buffer; static free functions for BSON helpers; macOS Mach VM memory query for available_memory_bytes()
 - [Phase 10-performance-improvements]: FTDC_PARSE_THRESHOLD_MS=5000ms (~2x 2143ms baseline); LOG_PARSE_THRESHOLD_MS=3000ms; synthetic /tmp log for 10k-line fixture
 - [Phase 10-05]: D-13: DebugPanel uses forward declarations only in header; NullableTimer RAII measures frame duration; FtdcView::metric_store() accessor added; set_sources() called per-frame for T-10-11 null safety
+- [Phase 10]: D-17: SDL_WaitEventTimeout replaces SDL_PollEvent spin; 66ms idle timeout after 500ms of no input; any_loading bypass keeps progress bars responsive
 
 ## Pending
 
