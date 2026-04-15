@@ -68,7 +68,16 @@ endif
 # host microarchitecture, e.g. on GitHub's virtualised arm64 runners).
 # Use -O3 only; simdjson's runtime dispatch still selects the best SIMD path.
 MARCH := $(if $(CI),,-march=native)
-CXXFLAGS := -std=c++17 -O3 $(MARCH) -flto=thin -Wall -Wextra -Wno-unused-parameter \
+
+# LTO flavor depends on compiler: ThinLTO is a Clang spelling; GCC uses -flto.
+# `-flto=thin` is only understood by clang/lld; GCC rejects it outright.
+ifeq ($(shell $(CXX) --version 2>/dev/null | grep -c clang),0)
+    LTO_FLAG := -flto
+else
+    LTO_FLAG := -flto=thin
+endif
+
+CXXFLAGS := -std=c++17 -O3 $(MARCH) $(LTO_FLAG) -Wall -Wextra -Wno-unused-parameter \
             -MMD -MP \
             -Isrc \
             -I$(IMGUI_BIND) \
@@ -80,7 +89,7 @@ CXXFLAGS := -std=c++17 -O3 $(MARCH) -flto=thin -Wall -Wextra -Wno-unused-paramet
 # C flags for md4c (compiled as C, not C++)
 CFLAGS := -O3 $(MARCH) -Wall -MMD -MP -Ivendor/md4c
 
-LDFLAGS := -flto=thin $(PKG_LIBS) $(PLATFORM_LIBS)
+LDFLAGS := $(LTO_FLAG) $(PKG_LIBS) $(PLATFORM_LIBS)
 
 TARGET   := yamla
 BUILDDIR := build/obj
