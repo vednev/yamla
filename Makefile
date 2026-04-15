@@ -69,6 +69,7 @@ endif
 # Use -O3 only; simdjson's runtime dispatch still selects the best SIMD path.
 MARCH := $(if $(CI),,-march=native)
 CXXFLAGS := -std=c++17 -O3 $(MARCH) -flto=thin -Wall -Wextra -Wno-unused-parameter \
+            -MMD -MP \
             -Isrc \
             -I$(IMGUI_BIND) \
             -Ivendor/httplib \
@@ -77,7 +78,7 @@ CXXFLAGS := -std=c++17 -O3 $(MARCH) -flto=thin -Wall -Wextra -Wno-unused-paramet
             $(PKG_CFLAGS) $(PLATFORM_CFLAGS)
 
 # C flags for md4c (compiled as C, not C++)
-CFLAGS := -O3 $(MARCH) -Wall -Ivendor/md4c
+CFLAGS := -O3 $(MARCH) -Wall -MMD -MP -Ivendor/md4c
 
 LDFLAGS := -flto=thin $(PKG_LIBS) $(PLATFORM_LIBS)
 
@@ -140,7 +141,7 @@ $(BUILDDIR)/vendor/md4c.o: vendor/md4c/md4c.c
 # Rule for vendor NFD (macOS: Objective-C)
 $(BUILDDIR)/vendor/nfd_cocoa.o: vendor/nfd/nfd_cocoa.m
 	@mkdir -p $(dir $@)
-	$(CC) -O3 $(MARCH) -Ivendor/nfd $(SDL2_CFLAGS) -fno-objc-arc -c $< -o $@
+	$(CC) -O3 $(MARCH) -MMD -MP -Ivendor/nfd $(SDL2_CFLAGS) -fno-objc-arc -c $< -o $@
 
 # Rule for vendor NFD (Linux: C++)
 $(BUILDDIR)/vendor/nfd_gtk.o: vendor/nfd/nfd_gtk.cpp
@@ -148,7 +149,7 @@ $(BUILDDIR)/vendor/nfd_gtk.o: vendor/nfd/nfd_gtk.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
-	rm -rf $(BUILDDIR) $(TARGET)
+	rm -rf $(BUILDDIR) $(DEBUG_BUILDDIR) $(TARGET) $(DEBUG_TARGET)
 
 run: all
 	./$(TARGET)
@@ -203,6 +204,8 @@ DEBUG_BUILDDIR := build/obj-debug
 DEBUG_TARGET   := yamla-debug
 
 DEBUG_CXXFLAGS := -std=c++17 -O0 -g -fsanitize=address -fno-omit-frame-pointer \
+                  -MMD -MP \
+                  -DYAMLA_DEBUG_BUILD=1 \
                   -Isrc \
                   -I$(IMGUI_BIND) \
                   -Ivendor/httplib \
@@ -236,12 +239,20 @@ $(DEBUG_BUILDDIR)/backends/%.o: $(IMGUI_BIND)/%.cpp
 
 $(DEBUG_BUILDDIR)/vendor/md4c.o: vendor/md4c/md4c.c
 	@mkdir -p $(dir $@)
-	$(CC) -O0 -g -fsanitize=address -Wall -Ivendor/md4c -c $< -o $@
+	$(CC) -O0 -g -fsanitize=address -Wall -MMD -MP -Ivendor/md4c -c $< -o $@
 
 $(DEBUG_BUILDDIR)/vendor/nfd_cocoa.o: vendor/nfd/nfd_cocoa.m
 	@mkdir -p $(dir $@)
-	$(CC) -O0 -g -fsanitize=address -Ivendor/nfd $(SDL2_CFLAGS) -fno-objc-arc -c $< -o $@
+	$(CC) -O0 -g -fsanitize=address -MMD -MP -Ivendor/nfd $(SDL2_CFLAGS) -fno-objc-arc -c $< -o $@
 
 $(DEBUG_BUILDDIR)/vendor/nfd_gtk.o: vendor/nfd/nfd_gtk.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(DEBUG_CXXFLAGS) -c $< -o $@
+
+# ---- Header dependency tracking ----------------------------
+# -MMD -MP (added to all *FLAGS) emits a .d alongside each .o describing
+# which headers the .o depends on. -include silently ignores missing files
+# so first-build (no .d files yet) still works.
+DEPS       := $(ALL_OBJS:.o=.d) $(TEST_OBJS:.o=.d) $(TEST_DEP_OBJS:.o=.d)
+DEBUG_DEPS := $(DEBUG_ALL_OBJS:.o=.d)
+-include $(DEPS) $(DEBUG_DEPS)
