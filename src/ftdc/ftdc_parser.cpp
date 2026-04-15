@@ -222,11 +222,24 @@ static bool bson_walk(const uint8_t* doc, size_t doc_len,
 }
 
 // ============================================================
-//  extract_metrics — build leaf schema from a reference BSON doc
+//  MetricLeaf — file-scope struct (used only in this TU)
 // ============================================================
-bool FtdcParser::extract_metrics(const uint8_t* doc, size_t doc_len,
-                                  const std::string& prefix,
-                                  std::vector<MetricLeaf>& leaves)
+// D-08: Moved out of FtdcParser class to allow helper functions to be static
+// free functions, eliminating LTO false-aliasing between doc_buf_ (member) and
+// pointer parameters derived from its data().
+struct MetricLeaf {
+    std::string path;
+    int64_t     value = 0;
+};
+
+// ============================================================
+//  extract_metrics — build leaf schema from a reference BSON doc
+//  Static free function: no `this`, so LTO cannot alias its pointer
+//  parameters with FtdcParser::doc_buf_.
+// ============================================================
+static bool extract_metrics(const uint8_t* doc, size_t doc_len,
+                             const std::string& prefix,
+                             std::vector<MetricLeaf>& leaves)
 {
     // Leaf values we care about (numeric)
     auto leaf_cb = [&](const std::string& path, uint8_t type, const uint8_t* val) {
@@ -268,11 +281,11 @@ bool FtdcParser::extract_metrics(const uint8_t* doc, size_t doc_len,
 }
 
 // ============================================================
-//  zlib_decompress
+//  zlib_decompress — static free function (no `this`)
 // ============================================================
-bool FtdcParser::zlib_decompress(const uint8_t* src, size_t src_len,
-                                  std::vector<uint8_t>& out,
-                                  std::string& err)
+static bool zlib_decompress(const uint8_t* src, size_t src_len,
+                             std::vector<uint8_t>& out,
+                             std::string& err)
 {
     // Initial estimate: 4x compressed size (FTDC data compresses well)
     size_t buf_sz = src_len * 4 + 1024;
@@ -328,12 +341,13 @@ bool FtdcParser::zlib_decompress(const uint8_t* src, size_t src_len,
 //      values as epoch milliseconds. Subsequent column timestamps
 //      are the same timestamp (FTDC samples all metrics at one instant).
 // ============================================================
-bool FtdcParser::decode_data_chunk(const uint8_t* data, size_t data_len,
-                                    int32_t n_metrics, int32_t n_samples,
-                                    const std::vector<std::string>& schema_paths,
-                                    const std::vector<int64_t>& ref_values,
-                                    int64_t start_ms,
-                                    MetricStore& store)
+// Static free function: no `this`, eliminating LTO aliasing with doc_buf_.
+static bool decode_data_chunk(const uint8_t* data, size_t data_len,
+                               int32_t n_metrics, int32_t n_samples,
+                               const std::vector<std::string>& schema_paths,
+                               const std::vector<int64_t>& ref_values,
+                               int64_t start_ms,
+                               MetricStore& store)
 {
     if (n_metrics <= 0 || n_samples <= 0) return true;
     // schema_paths/ref_values may be shorter or longer than n_metrics due to
@@ -487,6 +501,13 @@ bool FtdcParser::parse_file(const std::string& path,
     size_t bytes_read = 0;
     bool   ok = true;
 
+    // D-08: Pre-reserve persistent buffer to avoid early resize churn.
+    // doc_buf_ is swapped into local_doc_buf so the parse loop works with a
+    // plain local vector (no `this` member access in the hot path).
+    std::vector<uint8_t> local_doc_buf;
+    std::swap(local_doc_buf, doc_buf_);
+    local_doc_buf.reserve(64 * 1024); // typical FTDC chunk size
+
     while (bytes_read + 4 <= file_size) {
         // Read BSON document size
         uint8_t size_buf[4];
@@ -501,10 +522,11 @@ bool FtdcParser::parse_file(const std::string& path,
         }
 
         // Read full BSON doc (we already read 4 bytes of the size)
-        std::vector<uint8_t> doc_buf(static_cast<size_t>(doc_size));
-        std::memcpy(doc_buf.data(), size_buf, 4);
+        // D-08: Reuse persistent buffer — no per-chunk heap allocation
+        local_doc_buf.resize(static_cast<size_t>(doc_size));
+        std::memcpy(local_doc_buf.data(), size_buf, 4);
         size_t remaining = static_cast<size_t>(doc_size) - 4;
-        if (std::fread(doc_buf.data() + 4, 1, remaining, fp) != remaining) {
+        if (std::fread(local_doc_buf.data() + 4, 1, remaining, fp) != remaining) {
             error_out = "Truncated FTDC chunk";
             ok = false;
             break;
@@ -522,8 +544,8 @@ bool FtdcParser::parse_file(const std::string& path,
         int64_t        start_val = 0;
 
         // Walk top-level doc fields with bounds checks (#15)
-        const uint8_t* p   = doc_buf.data() + 4;
-        const uint8_t* end = doc_buf.data() + doc_size;
+        const uint8_t* p   = local_doc_buf.data() + 4;
+        const uint8_t* end = local_doc_buf.data() + doc_size;
         while (p < end) {
             uint8_t ftype = *p++;
             if (ftype == 0) break;
@@ -688,6 +710,9 @@ bool FtdcParser::parse_file(const std::string& path,
         }
         // chunk_type 2+ = reserved/metadata update, skip
     }
+
+    // D-08: Swap back so doc_buf_ retains the allocation for next parse_file() call.
+    std::swap(local_doc_buf, doc_buf_);
 
     std::fclose(fp);
     store.update_time_range();

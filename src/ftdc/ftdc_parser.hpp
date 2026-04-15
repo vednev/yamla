@@ -46,33 +46,8 @@ public:
     void set_progress_cb(ProgressCb cb) { progress_cb_ = std::move(cb); }
 
 private:
-    // BSON traversal — build a flat dot-path list of all int32/int64/double/date
-    // leaf values, and extract those values into a parallel int64 vector.
-    struct MetricLeaf {
-        std::string path;
-        int64_t     value = 0; // raw int64 representation
-    };
-
-    // Walk a BSON document recursively, populating flat leaf list.
-    // prefix = current path prefix (dot-separated)
-    bool extract_metrics(const uint8_t* doc, size_t doc_len,
-                         const std::string& prefix,
-                         std::vector<MetricLeaf>& leaves);
-
-    // Decompress a zlib blob; returns uncompressed bytes
-    bool zlib_decompress(const uint8_t* src, size_t src_len,
-                         std::vector<uint8_t>& out, std::string& err);
-
-    // Read a packed delta-encoded chunk after decompression.
-    // Format: nMetrics * nSamples int64 values, written column-major
-    // (all samples for metric 0, then all for metric 1, etc.),
-    // each value stored as a zigzag-encoded varint.
-    bool decode_data_chunk(const uint8_t* data, size_t data_len,
-                           int32_t n_metrics, int32_t n_samples,
-                           const std::vector<std::string>& schema_paths,
-                           const std::vector<int64_t>& ref_values,
-                           int64_t start_ms,
-                           MetricStore& store);
-
     ProgressCb progress_cb_;
+    // D-08: persistent buffer reused across parse_file() calls via resize(),
+    // eliminating per-chunk heap allocation.
+    std::vector<uint8_t> doc_buf_;
 };
