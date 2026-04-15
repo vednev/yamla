@@ -1510,58 +1510,119 @@ void App::render_frame() {
 // ------------------------------------------------------------
 //  run — main loop
 // ------------------------------------------------------------
+// D-17: Shared SDL event handler — called from both SDL_WaitEventTimeout and drain paths.
+// Preserves all existing keyboard, quit, and drag-and-drop handling verbatim.
+void App::handle_sdl_event(const SDL_Event& event) {
+    ImGui_ImplSDL2_ProcessEvent(&event);
+
+    switch (event.type) {
+        case SDL_QUIT:
+            running_ = false;
+            break;
+
+        case SDL_KEYDOWN:
+            // F12: toggle developer debug overlay (D-13)
+            if (event.key.keysym.sym == SDLK_F12) {
+                debug_panel_.toggle();
+                break;
+            }
+            if (event.key.keysym.mod & KMOD_ALT &&
+                event.key.keysym.sym == SDLK_F4)
+                running_ = false;
+            // Ctrl+A: toggle AI assistant chat
+            if ((event.key.keysym.mod & KMOD_CTRL) &&
+                event.key.keysym.sym == SDLK_a &&
+                !ImGui::GetIO().WantTextInput)
+                active_session().chat_view.toggle();
+            // Escape: close AI assistant chat
+            if (event.key.keysym.sym == SDLK_ESCAPE &&
+                active_session().chat_view.is_open())
+                active_session().chat_view.close();
+            break;
+
+        case SDL_DROPFILE: {
+            // SDL delivers one SDL_DROPFILE per file;
+            // accumulate until SDL_DROPCOMPLETE.
+            pending_drops_.emplace_back(event.drop.file);
+            SDL_free(event.drop.file);
+            break;
+        }
+
+        case SDL_DROPCOMPLETE: {
+            if (!pending_drops_.empty()) {
+                handle_drop(pending_drops_);
+                pending_drops_.clear();
+            }
+            break;
+        }
+
+        default: break;
+    }
+}
+
 int App::run() {
     if (!init()) return 1;
 
     ImVec4 clear_color(0.00f, 0.00f, 0.00f, 1.00f);
 
+    last_interaction_tick_ = SDL_GetTicks();
+
     while (running_) {
+        // --- D-17: Idle detection ---------------------------------
+        ImGuiIO& io = ImGui::GetIO();
+        bool any_loading = false;
+        for (const auto& s : sessions_) {
+            if (!s) continue;
+            if (s->cluster && s->cluster->state() == LoadState::Loading) {
+                any_loading = true; break;
+            }
+            if (s->ftdc_view.load_state() == FtdcLoadState::Loading) {
+                any_loading = true; break;
+            }
+        }
+
+        bool interacting = any_loading
+            || io.MouseDelta.x != 0.0f
+            || io.MouseDelta.y != 0.0f
+            || io.MouseWheel   != 0.0f
+            || io.MouseWheelH  != 0.0f
+            || io.WantCaptureKeyboard
+            || ImGui::IsAnyMouseDown();
+
+        uint32_t now = SDL_GetTicks();
+        if (interacting) last_interaction_tick_ = now;
+        bool idle = (now - last_interaction_tick_) > IDLE_THRESHOLD_MS;
+        int timeout_ms = idle ? IDLE_TIMEOUT_MS : 0;
+
+        // --- D-17: Wait up to timeout_ms for next event -----------
         SDL_Event event;
+        if (SDL_WaitEventTimeout(&event, timeout_ms)) {
+            handle_sdl_event(event);
+            // Update interaction tick on input event types
+            if (event.type == SDL_MOUSEMOTION
+                || event.type == SDL_MOUSEBUTTONDOWN
+                || event.type == SDL_MOUSEBUTTONUP
+                || event.type == SDL_MOUSEWHEEL
+                || event.type == SDL_KEYDOWN
+                || event.type == SDL_KEYUP
+                || event.type == SDL_TEXTINPUT
+                || event.type == SDL_DROPFILE) {
+                last_interaction_tick_ = SDL_GetTicks();
+            }
+        }
+
+        // Drain any remaining queued events
         while (SDL_PollEvent(&event)) {
-            ImGui_ImplSDL2_ProcessEvent(&event);
-
-            switch (event.type) {
-                case SDL_QUIT:
-                    running_ = false;
-                    break;
-
-                case SDL_KEYDOWN:
-                    // F12: toggle developer debug overlay (D-13)
-                    if (event.key.keysym.sym == SDLK_F12) {
-                        debug_panel_.toggle();
-                        break;
-                    }
-                    if (event.key.keysym.mod & KMOD_ALT &&
-                        event.key.keysym.sym == SDLK_F4)
-                        running_ = false;
-                    // Ctrl+A: toggle AI assistant chat
-                    if ((event.key.keysym.mod & KMOD_CTRL) &&
-                        event.key.keysym.sym == SDLK_a &&
-                        !ImGui::GetIO().WantTextInput)
-                        active_session().chat_view.toggle();
-                    // Escape: close AI assistant chat
-                    if (event.key.keysym.sym == SDLK_ESCAPE &&
-                        active_session().chat_view.is_open())
-                        active_session().chat_view.close();
-                    break;
-
-                case SDL_DROPFILE: {
-                    // SDL delivers one SDL_DROPFILE per file;
-                    // accumulate until SDL_DROPCOMPLETE.
-                    pending_drops_.emplace_back(event.drop.file);
-                    SDL_free(event.drop.file);
-                    break;
-                }
-
-                case SDL_DROPCOMPLETE: {
-                    if (!pending_drops_.empty()) {
-                        handle_drop(pending_drops_);
-                        pending_drops_.clear();
-                    }
-                    break;
-                }
-
-                default: break;
+            handle_sdl_event(event);
+            if (event.type == SDL_MOUSEMOTION
+                || event.type == SDL_MOUSEBUTTONDOWN
+                || event.type == SDL_MOUSEBUTTONUP
+                || event.type == SDL_MOUSEWHEEL
+                || event.type == SDL_KEYDOWN
+                || event.type == SDL_KEYUP
+                || event.type == SDL_TEXTINPUT
+                || event.type == SDL_DROPFILE) {
+                last_interaction_tick_ = SDL_GetTicks();
             }
         }
 

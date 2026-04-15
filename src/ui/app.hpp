@@ -9,6 +9,7 @@
 // Forward-declare SDL types to avoid polluting headers
 struct SDL_Window;
 struct SDL_Renderer;
+union  SDL_Event;
 typedef void* SDL_GLContext;
 
 // Forward-declare DX11 types (Windows only)
@@ -208,4 +209,12 @@ private:
 
     void load_knowledge();          // reads knowledge/*.md into knowledge_text_
     void setup_llm();               // configure client after prefs load
+
+    // D-17: Shared SDL event handler — called from both SDL_WaitEventTimeout and drain paths
+    void handle_sdl_event(const SDL_Event& event);
+
+    // D-17: Adaptive frame rate — idle detection for SDL_WaitEventTimeout
+    uint32_t last_interaction_tick_ = 0;  // SDL_GetTicks() at last user input
+    static constexpr uint32_t IDLE_THRESHOLD_MS = 500;  // no input for 500 ms => idle
+    static constexpr int      IDLE_TIMEOUT_MS   = 66;   // ~15 FPS when idle
 };
