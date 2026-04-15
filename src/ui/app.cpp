@@ -1275,12 +1275,16 @@ void App::render_frame() {
                 // Clear conversation — old data context is stale
                 s.llm_client.clear();
 
-                // Build flat pointer list for FTDC annotation markers
+                // D-07: Pre-filter to Error+Warning entries only, sorted by timestamp.
+                // entries are already sorted by timestamp from sort_entries_by_time()
+                // so log_entry_ptrs is naturally sorted — REQUIRED invariant for the
+                // std::lower_bound binary search in ChartPanelView::render_inner().
                 s.log_entry_ptrs.clear();
                 const auto& entries = s.cluster->entries();
-                s.log_entry_ptrs.reserve(entries.size());
-                for (size_t i = 0; i < entries.size(); ++i)
-                    s.log_entry_ptrs.push_back(&entries[i]);
+                for (size_t i = 0; i < entries.size(); ++i) {
+                    if (entries[i].severity <= Severity::Warning)
+                        s.log_entry_ptrs.push_back(&entries[i]);
+                }
                 s.ftdc_view.set_log_data(&s.log_entry_ptrs, &s.cluster->strings());
 
                 // Check for files that failed to parse (active session only)

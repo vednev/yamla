@@ -351,6 +351,7 @@ void ChartPanelView::render_minimap(float width, float height) {
 //  render_stats_row
 // ============================================================
 void ChartPanelView::render_stats_row(const MetricSeries& series,
+                                       ChartState& state,
                                        bool use_rate,
                                        int64_t t0_ms,
                                        int64_t t1_ms)
@@ -366,7 +367,19 @@ void ChartPanelView::render_stats_row(const MetricSeries& series,
 
     if (times.empty()) return;
 
-    WindowStats ws = FtdcAnalyzer::compute_window_stats(times, values, t0_ms, t1_ms);
+    // Stats caching (D-05): only recompute when time window changes
+    bool stats_stale = !state.stats.valid
+        || state.stats.cached_t0_ms != t0_ms
+        || state.stats.cached_t1_ms != t1_ms;
+
+    if (stats_stale) {
+        state.stats.ws = FtdcAnalyzer::compute_window_stats(
+            times, values, t0_ms, t1_ms, state.sorted_vals_scratch);
+        state.stats.cached_t0_ms = t0_ms;
+        state.stats.cached_t1_ms = t1_ms;
+        state.stats.valid = true;
+    }
+    const WindowStats& ws = state.stats.ws;
     if (!ws.valid) return;
 
     const std::string& unit = series.unit;
@@ -413,32 +426,19 @@ void ChartPanelView::render_stats_row(const MetricSeries& series,
 
 // ============================================================
 //  render_annotation_markers
+//  Uses frame_err_xs_ / frame_warn_xs_ pre-computed in render_inner()
+//  via std::lower_bound binary search (D-07). No per-chart scan.
 // ============================================================
-void ChartPanelView::render_annotation_markers(double x_min, double x_max) {
-    if (!log_entries_ || !log_strings_) return;
-
-    // Batch annotation X values by severity to avoid ImPlot ID conflicts (#38).
-    // Only show Error/Warning level events to avoid noise (#18).
-    std::vector<double> err_xs, warn_xs;
-    for (const auto* e : *log_entries_) {
-        if (e->severity > Severity::Warning) continue; // skip Info/Debug
-        double ex = ms_to_plot(e->timestamp_ms);
-        if (ex < x_min || ex > x_max) continue;
-        if (e->severity <= Severity::Error)
-            err_xs.push_back(ex);
-        else
-            warn_xs.push_back(ex);
-    }
-
-    if (!err_xs.empty()) {
+void ChartPanelView::render_annotation_markers() {
+    if (!frame_err_xs_.empty()) {
         ImPlot::SetNextLineStyle(COL_ANNOTATION_ERR, 1.0f);
-        ImPlot::PlotInfLines("##ann_err", err_xs.data(),
-                             static_cast<int>(err_xs.size()));
+        ImPlot::PlotInfLines("##ann_err", frame_err_xs_.data(),
+                             static_cast<int>(frame_err_xs_.size()));
     }
-    if (!warn_xs.empty()) {
+    if (!frame_warn_xs_.empty()) {
         ImPlot::SetNextLineStyle(COL_ANNOTATION_WARN, 1.0f);
-        ImPlot::PlotInfLines("##ann_warn", warn_xs.data(),
-                             static_cast<int>(warn_xs.size()));
+        ImPlot::PlotInfLines("##ann_warn", frame_warn_xs_.data(),
+                             static_cast<int>(frame_warn_xs_.size()));
     }
 }
 
@@ -466,16 +466,27 @@ void ChartPanelView::render_chart(const MetricSeries& series,
 
     size_t n = std::min(ts.size(), values.size());
 
-    // LTTB downsample for rendering
-    std::vector<size_t> indices = FtdcAnalyzer::lttb_downsample(values, MAX_PLOT_PTS);
-    std::vector<double> plot_x, plot_y;
-    plot_x.reserve(indices.size());
-    plot_y.reserve(indices.size());
-    for (size_t idx : indices) {
-        if (idx < n) {
-            plot_x.push_back(ms_to_plot(ts[idx]));
-            plot_y.push_back(values[idx]);
+    // LTTB downsample for rendering — cached per metric (D-04)
+    static constexpr double LTTB_CACHE_EPSILON = 0.001; // 1ms in plot seconds
+    bool lttb_stale = !state.lttb.valid
+        || std::abs(state.lttb.cached_x_min - x_view_min_) > LTTB_CACHE_EPSILON
+        || std::abs(state.lttb.cached_x_max - x_view_max_) > LTTB_CACHE_EPSILON;
+
+    if (lttb_stale) {
+        auto indices = FtdcAnalyzer::lttb_downsample(values, MAX_PLOT_PTS);
+        state.lttb.plot_x.clear();
+        state.lttb.plot_y.clear();
+        state.lttb.plot_x.reserve(indices.size());
+        state.lttb.plot_y.reserve(indices.size());
+        for (size_t idx : indices) {
+            if (idx < n) {
+                state.lttb.plot_x.push_back(ms_to_plot(ts[idx]));
+                state.lttb.plot_y.push_back(values[idx]);
+            }
         }
+        state.lttb.cached_x_min = x_view_min_;
+        state.lttb.cached_x_max = x_view_max_;
+        state.lttb.valid = true;
     }
 
     // ---- Compute Y-axis min/max from FULL data (not downsampled) ----
@@ -610,7 +621,7 @@ void ChartPanelView::render_chart(const MetricSeries& series,
             ImPlot::SetupAxisScale(ImAxis_Y1, ImPlotScale_Log10);
 
         // Threshold gradient fill + line (D-83/D-84)
-        if (has_threshold && !plot_x.empty()) {
+        if (has_threshold && !state.lttb.plot_x.empty()) {
             // Only draw gradient when threshold is within or below
             // the visible Y range.  When thresh >= y_hi the entire
             // chart is below the threshold — no danger zone to show.
@@ -639,11 +650,11 @@ void ChartPanelView::render_chart(const MetricSeries& series,
         }
 
         // Main data line — thicker for visibility (D-80)
-        if (!plot_x.empty()) {
+        if (!state.lttb.plot_x.empty()) {
             ImPlot::SetNextLineStyle(ImVec4(0.40f, 0.70f, 1.0f, 1.0f), 2.0f);
             ImPlot::PlotLine(series.display_name.c_str(),
-                             plot_x.data(), plot_y.data(),
-                             static_cast<int>(plot_x.size()));
+                             state.lttb.plot_x.data(), state.lttb.plot_y.data(),
+                             static_cast<int>(state.lttb.plot_x.size()));
 
             // Area fill below the line at ~15% opacity (D-81, Grafana-style)
             ImVec4 line_color = ImPlot::GetLastItemColor();
@@ -651,14 +662,13 @@ void ChartPanelView::render_chart(const MetricSeries& series,
             ImPlot::SetNextFillStyle(line_color);
             double shade_ref = y_lo;  // shade down to Y-axis bottom
             ImPlot::PlotShaded(series.display_name.c_str(),
-                               plot_x.data(), plot_y.data(),
-                               static_cast<int>(plot_x.size()),
+                               state.lttb.plot_x.data(), state.lttb.plot_y.data(),
+                               static_cast<int>(state.lttb.plot_x.size()),
                                shade_ref);
         }
 
-        // Log event annotation markers
-        ImPlotRect limits = ImPlot::GetPlotLimits();
-        render_annotation_markers(limits.X.Min, limits.X.Max);
+        // Log event annotation markers (pre-computed once per frame in render_inner)
+        render_annotation_markers();
 
         // Crosshair — shared vertical line across all charts
         if (!std::isnan(crosshair_x_)) {
@@ -772,7 +782,7 @@ void ChartPanelView::render_chart(const MetricSeries& series,
     // Stats row below chart (computed over the current view window)
     int64_t t0 = plot_to_ms(x_view_min_);
     int64_t t1 = plot_to_ms(x_view_max_);
-    render_stats_row(series, use_rate, t0, t1);
+    render_stats_row(series, state, use_rate, t0, t1);
 
     ImGui::EndGroup(); // End group started before title
     ImGui::PopID();
@@ -800,6 +810,35 @@ void ChartPanelView::render_inner() {
         x_view_min_ = x_min_;
         x_view_max_ = x_max_;
         axis_initialized_ = true;
+    }
+
+    // D-07: Pre-compute annotation X positions once per frame (shared across all charts).
+    // log_entries_ is pre-filtered (Error+Warning only) and sorted by timestamp_ms in app.cpp,
+    // so we binary-search the visible range start via std::lower_bound rather than scanning.
+    frame_err_xs_.clear();
+    frame_warn_xs_.clear();
+    if (log_entries_ && log_strings_ && !log_entries_->empty()) {
+        // Convert view bounds (plot seconds) to milliseconds for comparison against timestamp_ms.
+        const int64_t t_min_ms = plot_to_ms(x_view_min_);
+        const int64_t t_max_ms = plot_to_ms(x_view_max_);
+
+        // Binary search for the first entry with timestamp_ms >= t_min_ms.
+        auto first = std::lower_bound(
+            log_entries_->begin(), log_entries_->end(), t_min_ms,
+            [](const LogEntry* e, int64_t t) {
+                return e->timestamp_ms < t;
+            });
+
+        // Iterate forward from `first` and stop as soon as timestamp_ms exceeds t_max_ms.
+        for (auto it = first; it != log_entries_->end(); ++it) {
+            const LogEntry* e = *it;
+            if (e->timestamp_ms > t_max_ms) break;
+            double ex = ms_to_plot(e->timestamp_ms);
+            if (e->severity <= Severity::Error)
+                frame_err_xs_.push_back(ex);
+            else
+                frame_warn_xs_.push_back(ex);
+        }
     }
 
     float avail_w = ImGui::GetContentRegionAvail().x;
