@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-04-15T16:20:13.760Z"
+last_updated: "2026-04-15T16:51:23.884Z"
 last_activity: 2026-04-15
 progress:
   total_phases: 13
   completed_phases: 6
   total_plans: 25
-  completed_plans: 18
-  percent: 72
+  completed_plans: 19
+  percent: 76
 ---
 
 # Project State
@@ -58,6 +58,7 @@ None — Phases 1-8 complete (7 done separately).
 - [Phase 10]: D-05: Stats cache invalidated on t0/t1 change; scratch buffer reused per ChartState
 - [Phase 10]: D-07: log_entry_ptrs pre-filtered to severity<=Warning at load; visible range via std::lower_bound
 - [Phase 10-performance-improvements]: D-11/D-12: Per-dimension DimensionMask bitmask filter + trigram index built at set_entries(); only changed dimension rescanned on filter change
+- [Phase 10-performance-improvements]: D-08/10-04: doc_buf_ swap pattern for LTO-safe persistent FTDC buffer; static free functions for BSON helpers; macOS Mach VM memory query for available_memory_bytes()
 
 ## Pending
 
