@@ -160,12 +160,12 @@ Plans:
 
 **Depends on:** Phase 9
 
-**Plans:** 2/7 plans executed
+**Plans:** 3/7 plans executed
 
 Plans:
 - [x] 10-01-PLAN.md — Timing infrastructure + dedup opt-out prefs + Makefile LTO/debug (Wave 1)
 - [x] 10-02-PLAN.md — Chart LTTB cache + stats cache + annotation pre-filter (Wave 1)
-- [ ] 10-03-PLAN.md — Per-dimension bitmask filter + trigram text index in LogView (Wave 1)
+- [x] 10-03-PLAN.md — Per-dimension bitmask filter + trigram text index in LogView (Wave 1)
 - [ ] 10-04-PLAN.md — FTDC single-thread tuning + conditional parallel decode (Wave 1)
 - [ ] 10-05-PLAN.md — DebugPanel (F12), TimingStats wiring, dedup prefs checkbox (Wave 2)
 - [ ] 10-06-PLAN.md — Adaptive frame rate via SDL_WaitEventTimeout + idle detection (Wave 3)
