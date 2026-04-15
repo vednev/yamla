@@ -112,7 +112,7 @@ Plans:
 **Plans:** 1 plan
 
 Plans:
-- [ ] 09-01-PLAN.md — Guidemark state, rendering, toolbar toggle, click dispatch, and visual verification
+- [x] 09-01-PLAN.md — Guidemark state, rendering, toolbar toggle, click dispatch, and visual verification
 
 ## Backlog
 
@@ -152,7 +152,26 @@ Plans:
 Plans:
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
+### Phase 10: Performance improvements across UI, file loading, and system components
+
+**Goal:** Deep performance pass across three domains — chart rendering (LTTB/stats caching, annotation pre-filter), filtering/search (per-dimension bitmasks, trigram text index), and file loading (FTDC single-thread tuning + conditional parallel decode). Also adds timing instrumentation, optional dedup (off by default), debug memory panel (F12), adaptive frame rate (SDL_WaitEventTimeout), LTO + ASan debug build targets, and an E2E parse-time regression test.
+
+**Requirements:** [PERF-01, PERF-02, PERF-03, PERF-04, PERF-05, PERF-06, PERF-07, PERF-08, PERF-09, PERF-10, PERF-11, PERF-12, PERF-13]
+
+**Depends on:** Phase 9
+
+**Plans:** 1/7 plans executed
+
+Plans:
+- [x] 10-01-PLAN.md — Timing infrastructure + dedup opt-out prefs + Makefile LTO/debug (Wave 1)
+- [ ] 10-02-PLAN.md — Chart LTTB cache + stats cache + annotation pre-filter (Wave 1)
+- [ ] 10-03-PLAN.md — Per-dimension bitmask filter + trigram text index in LogView (Wave 1)
+- [ ] 10-04-PLAN.md — FTDC single-thread tuning + conditional parallel decode (Wave 1)
+- [ ] 10-05-PLAN.md — DebugPanel (F12), TimingStats wiring, dedup prefs checkbox (Wave 2)
+- [ ] 10-06-PLAN.md — Adaptive frame rate via SDL_WaitEventTimeout + idle detection (Wave 3)
+- [ ] 10-07-PLAN.md — E2E parse-time regression test (test_e2e_perf.cpp) (Wave 2)
+
 ---
 
 *Roadmap created: 2026-04-12*
-*Updated: 2026-04-14 — Phase 9 planned (1 plan, 1 wave)*
+*Updated: 2026-04-15 — Phase 10 planned (7 plans, 3 waves)*
