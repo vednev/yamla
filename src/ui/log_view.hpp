@@ -7,6 +7,7 @@
 #include <functional>
 #include <unordered_set>
 #include "../core/chunk_vector.hpp"
+#include "../core/bitmask_filter.hpp"
 
 // Forward declarations
 struct LogEntry;
@@ -123,4 +124,43 @@ private:
     static constexpr double      DEBOUNCE_MS = 150.0;
     bool                         search_dirty_     = false;
     double                       search_dirty_time_ = 0.0; // ImGui time at last keystroke
+
+    // D-11: Per-dimension bitmask filter index
+    DimensionMask mask_severity_;
+    DimensionMask mask_component_;
+    DimensionMask mask_op_type_;
+    DimensionMask mask_ns_;
+    DimensionMask mask_shape_;
+    DimensionMask mask_slow_query_;
+    DimensionMask mask_conn_id_;
+    DimensionMask mask_driver_;
+    DimensionMask mask_node_;
+    DimensionMask mask_time_window_;
+    DimensionMask mask_text_;
+
+    // D-12: Trigram index for text search
+    std::vector<std::pair<uint32_t, uint32_t>> trigram_index_;  // sorted (trigram_key, entry_idx)
+    bool trigram_index_built_ = false;
+
+    // Snapshot of filter state for detecting which dimensions changed
+    FilterState prev_filter_;
+
+    // D-11: Rebuild a single dimension's bitmask
+    void rebuild_all_dimension_masks();
+    void rebuild_severity_mask();
+    void rebuild_component_mask();
+    void rebuild_op_type_mask();
+    void rebuild_ns_mask();
+    void rebuild_shape_mask();
+    void rebuild_slow_query_mask();
+    void rebuild_conn_id_mask();
+    void rebuild_driver_mask();
+    void rebuild_node_mask();
+    void rebuild_time_window_mask();
+    void rebuild_text_mask();
+    void apply_combined_masks();
+
+    // D-12: Trigram index
+    void build_trigram_index();
+    void search_trigram(const std::string& query, DimensionMask& mask);
 };
