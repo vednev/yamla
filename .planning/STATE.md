@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-04-15T16:07:56.991Z"
+last_updated: "2026-04-15T16:14:21.519Z"
 last_activity: 2026-04-15
 progress:
   total_phases: 13
   completed_phases: 6
   total_plans: 25
-  completed_plans: 16
-  percent: 64
+  completed_plans: 17
+  percent: 68
 ---
 
 # Project State
@@ -54,6 +54,9 @@ None — Phases 1-8 complete (7 done separately).
 - [Phase 08]: D-80/D-81: 2.0px line width + 15% opacity area fill; D-83/D-84: gradient threshold fill via AddRectFilledMultiColor; D-85/D-86: green/yellow/red stats coloring; D-87/D-88: abbreviated 30+ display names
 - [Phase 10]: D-10: dedup_enabled defaults false; O(N^2) dedup_entries() skipped unless user toggles on via prefs
 - [Phase 10]: D-15/D-16: ThinLTO (-flto=thin) in CXXFLAGS+LDFLAGS for release; debug target uses build/obj-debug with ASan and -O0
+- [Phase 10]: D-04: LTTB cache invalidated only when x_view bounds change beyond 0.001s epsilon
+- [Phase 10]: D-05: Stats cache invalidated on t0/t1 change; scratch buffer reused per ChartState
+- [Phase 10]: D-07: log_entry_ptrs pre-filtered to severity<=Warning at load; visible range via std::lower_bound
 
 ## Pending
 
