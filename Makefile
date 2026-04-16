@@ -104,9 +104,14 @@ VENDOR_C_SRCS := vendor/md4c/md4c.c
 VENDOR_C_OBJS := $(BUILDDIR)/vendor/md4c.o
 
 # Vendor NFD-extended (platform-conditional backend)
+# NFD is dead code (replaced by custom FilePicker) but kept for now.
+# Windows has no vendored NFD backend — skip compilation there.
 ifeq ($(UNAME), Darwin)
   VENDOR_NFD_SRCS := vendor/nfd/nfd_cocoa.m
   VENDOR_NFD_OBJS := $(BUILDDIR)/vendor/nfd_cocoa.o
+else ifeq ($(OS), Windows_NT)
+  VENDOR_NFD_SRCS :=
+  VENDOR_NFD_OBJS :=
 else
   VENDOR_NFD_SRCS := vendor/nfd/nfd_gtk.cpp
   VENDOR_NFD_OBJS := $(BUILDDIR)/vendor/nfd_gtk.o
