@@ -159,11 +159,15 @@ jobs:
           path: ${{ env.ARCHIVE }}
 
   # ─────────────────────────────────────────────────────────
-  #  Windows x86_64 (MSYS2/MinGW)
+  #  Windows x86_64 (MSYS2/CLANG64)
   # ─────────────────────────────────────────────────────────
   build-windows:
     name: Windows (x86_64)
     runs-on: windows-latest
+
+    env:
+      CC: clang
+      CXX: clang++
 
     defaults:
       run:
@@ -201,7 +205,7 @@ jobs:
             --build=missing
 
       - name: Build
-        run: make all
+        run: make CC=clang CXX=clang++ all
 
       - name: Package
         shell: pwsh
