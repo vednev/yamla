@@ -159,15 +159,14 @@ jobs:
           path: ${{ env.ARCHIVE }}
 
   # ─────────────────────────────────────────────────────────
-  #  Windows x86_64 (MSYS2/CLANG64)
+  #  Windows x86_64 (MSYS2/MINGW64)
+  #  Uses GCC — the DX11 imgui backend requires DirectX headers
+  #  that conan's imgui package doesn't ship for CLANG64.
+  #  The Makefile's LTO_FLAG conditional handles -flto vs -flto=thin.
   # ─────────────────────────────────────────────────────────
   build-windows:
     name: Windows (x86_64)
     runs-on: windows-latest
-
-    env:
-      CC: clang
-      CXX: clang++
 
     defaults:
       run:
@@ -178,24 +177,25 @@ jobs:
 
       - uses: msys2/setup-msys2@v2
         with:
-          msystem: CLANG64
+          msystem: MINGW64
           update: true
           install: >-
-            mingw-w64-clang-x86_64-toolchain
-            mingw-w64-clang-x86_64-cmake
-            mingw-w64-clang-x86_64-SDL2
-            mingw-w64-clang-x86_64-zlib
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-SDL2
+            mingw-w64-x86_64-zlib
+            mingw-w64-x86_64-gtk3
             pkg-config
             make
 
       - name: Install Conan
         run: |
-          pacman -S --noconfirm mingw-w64-clang-x86_64-python-pip
+          pacman -S --noconfirm mingw-w64-x86_64-python-pip
           pip install conan
           conan profile detect --force
           PROFILE_PATH=$(conan profile path default)
-          CLANG_VER=$(clang -dumpversion | cut -d. -f1)
-          printf '[settings]\narch=x86_64\nbuild_type=Release\ncompiler=clang\ncompiler.cppstd=17\ncompiler.libcxx=libc++\ncompiler.version=%s\nos=Windows\n[conf]\ntools.cmake.cmaketoolchain:generator=MinGW Makefiles\n' "$CLANG_VER" > "$PROFILE_PATH"
+          GCC_VER=$(gcc -dumpversion | cut -d. -f1)
+          printf '[settings]\narch=x86_64\nbuild_type=Release\ncompiler=gcc\ncompiler.cppstd=17\ncompiler.libcxx=libstdc++11\ncompiler.version=%s\nos=Windows\n[conf]\ntools.cmake.cmaketoolchain:generator=MinGW Makefiles\n' "$GCC_VER" > "$PROFILE_PATH"
 
       - name: Install Conan packages
         run: |
@@ -205,7 +205,7 @@ jobs:
             --build=missing
 
       - name: Build
-        run: make CC=clang CXX=clang++ all
+        run: make all
 
       - name: Package
         shell: pwsh
