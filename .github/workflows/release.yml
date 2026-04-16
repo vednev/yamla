@@ -159,72 +159,11 @@ jobs:
           path: ${{ env.ARCHIVE }}
 
   # ─────────────────────────────────────────────────────────
-  #  Windows x86_64 (MSYS2/CLANG64)
-  #  Uses clang — SDL Renderer backend has no DirectX SDK dependency,
-  #  so CLANG64 works fine. Uses libc++ (CLANG64 default).
-  # ─────────────────────────────────────────────────────────
-  build-windows:
-    name: Windows (x86_64)
-    runs-on: windows-latest
-
-    defaults:
-      run:
-        shell: msys2 {0}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: msys2/setup-msys2@v2
-        with:
-          msystem: CLANG64
-          update: true
-          install: >-
-            mingw-w64-clang-x86_64-toolchain
-            mingw-w64-clang-x86_64-cmake
-            mingw-w64-clang-x86_64-SDL2
-            mingw-w64-clang-x86_64-zlib
-            pkg-config
-            make
-
-      - name: Install Conan
-        run: |
-          pacman -S --noconfirm mingw-w64-clang-x86_64-python-pip
-          pip install conan
-          conan profile detect --force
-          PROFILE_PATH=$(conan profile path default)
-          CLANG_VER=$(clang -dumpversion | cut -d. -f1)
-          printf '[settings]\narch=x86_64\nbuild_type=Release\ncompiler=clang\ncompiler.cppstd=17\ncompiler.libcxx=libc++\ncompiler.version=%s\nos=Windows\n[conf]\ntools.cmake.cmaketoolchain:generator=MinGW Makefiles\n' "$CLANG_VER" > "$PROFILE_PATH"
-
-      - name: Install Conan packages
-        run: |
-          mkdir -p build/conan
-          conan install . \
-            --output-folder=build/conan \
-            --build=missing
-
-      - name: Build
-        run: make CC=clang CXX=clang++ all
-
-      - name: Package
-        shell: pwsh
-        run: |
-          $VERSION = "${{ github.ref_name }}"
-          $ARCHIVE = "yamla-${VERSION}-windows-x64.zip"
-          Compress-Archive -Path yamla.exe, vendor/fonts, knowledge, README.md -DestinationPath $ARCHIVE
-          echo "ARCHIVE=$ARCHIVE" | Out-File -Append -FilePath $env:GITHUB_ENV
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: yamla-windows-x64
-          path: ${{ env.ARCHIVE }}
-
-  # ─────────────────────────────────────────────────────────
   #  Create GitHub Release and attach all binaries
   # ─────────────────────────────────────────────────────────
   release:
     name: Create Release
-    needs: [build-macos, build-linux-amd64, build-linux-arm64, build-windows]
+    needs: [build-macos, build-linux-amd64, build-linux-arm64]
     runs-on: ubuntu-22.04
 
     permissions:
@@ -257,7 +196,7 @@ jobs:
             | macOS (Apple Silicon) | `yamla-${{ github.ref_name }}-macos-arm64.tar.gz` |
             | Linux x86\_64 | `yamla-${{ github.ref_name }}-linux-amd64.tar.gz` |
             | Linux arm64 | `yamla-${{ github.ref_name }}-linux-arm64.tar.gz` |
-            | Windows x64 | `yamla-${{ github.ref_name }}-windows-x64.zip` |
+            | Windows x64 | _Not yet available — build from source_ |
 
             Each archive contains the `yamla` binary, bundled fonts (`vendor/fonts/`), knowledge files (`knowledge/`), and `README.md`.
 
