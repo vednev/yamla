@@ -9,12 +9,15 @@
 #include <algorithm>
 #include <limits>
 #include <thread>
-#include <unistd.h>  // sysconf
 
 #if defined(__APPLE__)
 #  include <mach/mach.h>
+#  include <unistd.h>
+#elif defined(_WIN32)
+#  include <windows.h>
 #else
 #  include <sys/sysinfo.h>
+#  include <unistd.h>
 #endif
 
 #include <zlib.h>
@@ -503,6 +506,12 @@ static size_t available_memory_bytes() {
     }
     uint64_t free_pages = vm_stat.free_count + vm_stat.inactive_count;
     return static_cast<size_t>(free_pages) * static_cast<size_t>(page_size_v);
+#elif defined(_WIN32)
+    // Windows: use GlobalMemoryStatusEx
+    MEMORYSTATUSEX ms;
+    ms.dwLength = sizeof(ms);
+    if (!GlobalMemoryStatusEx(&ms)) return SIZE_MAX;
+    return static_cast<size_t>(ms.ullAvailPhys);
 #else
     // Linux/POSIX: use _SC_AVPHYS_PAGES
     long pages     = sysconf(_SC_AVPHYS_PAGES);

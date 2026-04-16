@@ -27,7 +27,7 @@ class ThreadPool {
 public:
     using Task = std::function<void()>;
 
-    explicit ThreadPool(size_t num_threads) : stop_(false), active_(0) {
+    explicit ThreadPool(size_t num_threads) : active_(0), stop_(false) {
         assert(num_threads > 0);
         workers_.reserve(num_threads);
         for (size_t i = 0; i < num_threads; ++i) {
