@@ -5,6 +5,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <sys/stat.h>
+#if defined(_WIN32)
+#include <direct.h>
+#endif
 
 // ------------------------------------------------------------
 //  Config path — ~/.config/yamla/prefs.json
