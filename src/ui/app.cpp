@@ -6,19 +6,10 @@
 #include <implot.h>
 
 // ---- Platform-specific renderer backend --------------------
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(_WIN32)
     // macOS: SDL2 Renderer → Metal (SDL2 uses CAMetalLayer internally)
+    // Windows: SDL2 Renderer → D3D11 (SDL2 uses D3D11 automatically on Windows)
 #   include <imgui_impl_sdlrenderer2.h>
-#elif defined(_WIN32)
-    // Windows: DirectX 11
-#   include <imgui_impl_dx11.h>
-#   define WIN32_LEAN_AND_MEAN
-#   include <windows.h>
-#   include <d3d11.h>
-#   include <dxgi.h>
-#   include <SDL_syswm.h>
-#   pragma comment(lib, "d3d11")
-#   pragma comment(lib, "dxgi")
 #else
     // Linux: OpenGL 3.3
 #   include <imgui_impl_opengl3.h>
@@ -37,53 +28,6 @@
 
 // Note: directory scanning for log file discovery moved to file_picker.cpp
 
-// ---- Windows DX11 helpers ----------------------------------
-#if defined(_WIN32)
-static bool create_dx11_device(HWND hwnd,
-                                ID3D11Device**          out_device,
-                                ID3D11DeviceContext**   out_context,
-                                IDXGISwapChain**        out_swapchain)
-{
-    DXGI_SWAP_CHAIN_DESC sd{};
-    sd.BufferCount                        = 2;
-    sd.BufferDesc.Width                   = 0;
-    sd.BufferDesc.Height                  = 0;
-    sd.BufferDesc.Format                  = DXGI_FORMAT_R8G8B8A8_UNORM;
-    sd.BufferDesc.RefreshRate.Numerator   = 60;
-    sd.BufferDesc.RefreshRate.Denominator = 1;
-    sd.Flags                              = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
-    sd.BufferUsage                        = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    sd.OutputWindow                       = hwnd;
-    sd.SampleDesc.Count                   = 1;
-    sd.SampleDesc.Quality                 = 0;
-    sd.Windowed                           = TRUE;
-    sd.SwapEffect                         = DXGI_SWAP_EFFECT_DISCARD;
-
-    D3D_FEATURE_LEVEL feature_level;
-    const D3D_FEATURE_LEVEL feature_levels[] = {
-        D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_0
-    };
-    HRESULT hr = D3D11CreateDeviceAndSwapChain(
-        nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
-        0, feature_levels, 2,
-        D3D11_SDK_VERSION, &sd,
-        out_swapchain, out_device,
-        &feature_level, out_context);
-    return SUCCEEDED(hr);
-}
-
-static ID3D11RenderTargetView* create_dx11_rtv(IDXGISwapChain*  swapchain,
-                                                ID3D11Device*    device)
-{
-    ID3D11Texture2D* back_buf = nullptr;
-    swapchain->GetBuffer(0, IID_PPV_ARGS(&back_buf));
-    if (!back_buf) return nullptr;
-    ID3D11RenderTargetView* rtv = nullptr;
-    device->CreateRenderTargetView(back_buf, nullptr, &rtv);
-    back_buf->Release();
-    return rtv;
-}
-#endif // _WIN32
 
 // ---- Arena sizing ------------------------------------------
 // Computed dynamically from system RAM and user preference.
@@ -272,7 +216,9 @@ bool App::init() {
     }
 
 #elif defined(_WIN32)
-    // Windows: create a plain window, then attach DX11 to its HWND.
+    // Windows: SDL2 Renderer — uses D3D11 under the hood automatically.
+    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "direct3d11");
+
     SDL_WindowFlags flags = static_cast<SDL_WindowFlags>(
         SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
     window_ = SDL_CreateWindow("YAMLA — MongoDB Log Analyzer",
@@ -283,16 +229,19 @@ bool App::init() {
         return false;
     }
 
-    SDL_SysWMinfo wmInfo{};
-    SDL_VERSION(&wmInfo.version);
-    SDL_GetWindowWMInfo(window_, &wmInfo);
-    HWND hwnd = wmInfo.info.win.window;
-
-    if (!create_dx11_device(hwnd, &d3d_device_, &d3d_context_, &d3d_swapchain_)) {
-        std::fprintf(stderr, "DX11 device creation failed\n");
+    renderer_ = SDL_CreateRenderer(window_, -1,
+                                    SDL_RENDERER_ACCELERATED |
+                                    SDL_RENDERER_PRESENTVSYNC);
+    if (!renderer_) {
+        std::fprintf(stderr, "SDL_CreateRenderer error: %s\n", SDL_GetError());
         return false;
     }
-    d3d_rtv_ = create_dx11_rtv(d3d_swapchain_, d3d_device_);
+
+    {
+        SDL_RendererInfo rinfo{};
+        SDL_GetRendererInfo(renderer_, &rinfo);
+        std::fprintf(stderr, "Renderer: %s\n", rinfo.name);
+    }
 
 #else
     // Linux: OpenGL 3.3 via SDL2
@@ -476,26 +425,19 @@ bool App::init() {
     //  in the few places that need it — table rows, collapsing headers.)
 
     // ---- ImGui platform + renderer backend init ---------------
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(_WIN32)
     ImGui_ImplSDL2_InitForSDLRenderer(window_, renderer_);
     ImGui_ImplSDLRenderer2_Init(renderer_);
-#elif defined(_WIN32)
-    ImGui_ImplSDL2_InitForD3D(window_);
-    ImGui_ImplDX11_Init(d3d_device_, d3d_context_);
 #else
     ImGui_ImplSDL2_InitForOpenGL(window_, gl_ctx_);
     ImGui_ImplOpenGL3_Init("#version 330 core");
 #endif
 
     // ---- Font manager: provide platform-appropriate texture callbacks ----
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(_WIN32)
     font_mgr_.set_callbacks(
         [] { ImGui_ImplSDLRenderer2_CreateFontsTexture(); },
         [] { ImGui_ImplSDLRenderer2_DestroyFontsTexture(); });
-#elif defined(_WIN32)
-    font_mgr_.set_callbacks(
-        [] { ImGui_ImplDX11_CreateFontsTexture(); },
-        [] { ImGui_ImplDX11_InvalidateDeviceObjects(); });
 #else
     font_mgr_.set_callbacks(
         [] { ImGui_ImplOpenGL3_CreateFontsTexture(); },
@@ -522,21 +464,12 @@ bool App::init() {
 //  shutdown
 // ------------------------------------------------------------
 void App::shutdown() {
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(_WIN32)
     ImGui_ImplSDLRenderer2_Shutdown();
     ImGui_ImplSDL2_Shutdown();
     if (ImPlot::GetCurrentContext()) ImPlot::DestroyContext();
     if (ImGui::GetCurrentContext())  ImGui::DestroyContext();
     if (renderer_) SDL_DestroyRenderer(renderer_);
-#elif defined(_WIN32)
-    ImGui_ImplDX11_Shutdown();
-    ImGui_ImplSDL2_Shutdown();
-    if (ImPlot::GetCurrentContext()) ImPlot::DestroyContext();
-    if (ImGui::GetCurrentContext())  ImGui::DestroyContext();
-    if (d3d_rtv_)      { d3d_rtv_->Release();      d3d_rtv_      = nullptr; }
-    if (d3d_swapchain_){ d3d_swapchain_->Release(); d3d_swapchain_= nullptr; }
-    if (d3d_context_)  { d3d_context_->Release();   d3d_context_  = nullptr; }
-    if (d3d_device_)   { d3d_device_->Release();    d3d_device_   = nullptr; }
 #else
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplSDL2_Shutdown();
@@ -1634,10 +1567,8 @@ int App::run() {
             font_mgr_.rebuild(prefs_, "vendor/fonts");
 
         // Start ImGui frame
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(_WIN32)
         ImGui_ImplSDLRenderer2_NewFrame();
-#elif defined(_WIN32)
-        ImGui_ImplDX11_NewFrame();
 #else
         ImGui_ImplOpenGL3_NewFrame();
 #endif
@@ -1652,7 +1583,7 @@ int App::run() {
         // Render
         ImGui::Render();
 
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(_WIN32)
         SDL_SetRenderDrawColor(renderer_,
             static_cast<Uint8>(clear_color.x * 255),
             static_cast<Uint8>(clear_color.y * 255),
@@ -1660,15 +1591,6 @@ int App::run() {
         SDL_RenderClear(renderer_);
         ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData());
         SDL_RenderPresent(renderer_);
-#elif defined(_WIN32)
-        {
-            float cc[4] = { clear_color.x, clear_color.y,
-                            clear_color.z, clear_color.w };
-            d3d_context_->ClearRenderTargetView(d3d_rtv_, cc);
-            d3d_context_->OMSetRenderTargets(1, &d3d_rtv_, nullptr);
-            ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
-            d3d_swapchain_->Present(1, 0); // vsync
-        }
 #else
         int w, h;
         SDL_GetWindowSize(window_, &w, &h);

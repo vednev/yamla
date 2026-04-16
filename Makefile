@@ -43,13 +43,13 @@ ifeq ($(UNAME), Darwin)
                       build/obj/backends/imgui_impl_sdlrenderer2.o
 
 else ifeq ($(OS), Windows_NT)
-  # Windows — SDL2 window + DirectX 11 renderer
+  # Windows — SDL2 Renderer (D3D11-backed automatically, no DirectX SDK needed)
   PLATFORM_CFLAGS  :=
-  PLATFORM_LIBS    := -ld3d11 -ldxgi -ld3dcompiler
+  PLATFORM_LIBS    :=
   BACKEND_SRCS     := $(IMGUI_BIND)/imgui_impl_sdl2.cpp \
-                      $(IMGUI_BIND)/imgui_impl_dx11.cpp
+                      $(IMGUI_BIND)/imgui_impl_sdlrenderer2.cpp
   BACKEND_OBJS     := build/obj/backends/imgui_impl_sdl2.o \
-                      build/obj/backends/imgui_impl_dx11.o
+                      build/obj/backends/imgui_impl_sdlrenderer2.o
 
 else
   # Linux — SDL2 + OpenGL 3.3 (unchanged)

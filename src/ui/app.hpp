@@ -12,13 +12,6 @@ struct SDL_Renderer;
 union  SDL_Event;
 typedef void* SDL_GLContext;
 
-// Forward-declare DX11 types (Windows only)
-#if defined(_WIN32)
-struct ID3D11Device;
-struct ID3D11DeviceContext;
-struct IDXGISwapChain;
-struct ID3D11RenderTargetView;
-#endif
 
 #include "../analysis/cluster.hpp"
 #include "../core/prefs.hpp"
@@ -156,16 +149,10 @@ private:
     SDL_Window*   window_  = nullptr;
 
     // Platform/renderer handles — platform-specific
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(_WIN32)
     // macOS: SDL2 Renderer (Metal-backed via CAMetalLayer)
+    // Windows: SDL2 Renderer (D3D11-backed automatically)
     SDL_Renderer* renderer_ = nullptr;
-#elif defined(_WIN32)
-    // Windows: DirectX 11
-    SDL_Renderer*          renderer_        = nullptr; // unused, kept for SDL init path
-    ID3D11Device*          d3d_device_      = nullptr;
-    ID3D11DeviceContext*   d3d_context_     = nullptr;
-    IDXGISwapChain*        d3d_swapchain_   = nullptr;
-    ID3D11RenderTargetView* d3d_rtv_        = nullptr;
 #else
     // Linux: OpenGL via SDL2
     SDL_GLContext gl_ctx_  = nullptr;
